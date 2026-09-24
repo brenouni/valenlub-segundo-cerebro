@@ -1,7 +1,4 @@
 # valenlub-segundo-cerebro
-<<<<<<< HEAD
-brenouni/valenlub-segundo-cerebro
-=======
 
 Cérebro portátil da Valen Lubrificantes (Grupo Valen).
 
@@ -15,4 +12,3 @@ Financeiro: contexto, decisões e pendências para Hermes e Grok Bot. Query prim
 Comece em `MAPA.md`. Núcleo curto em `MEMORY.md` (teto 2.200 caracteres).
 
 Este repositório é o **Cérebro · Financeiro**. Vendas, Operação e cérebro geral só existem quando um segundo domínio entrar na leva. As outras 7 empresas do grupo não moram aqui.
->>>>>>> a25c0a1 (Cerebro ValenLub: arvore T3, MAPA, souls e skills da primeira onda.)
