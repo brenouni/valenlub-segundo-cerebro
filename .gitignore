@@ -1,0 +1,9 @@
+*
+!*.md
+!*.html
+!*.sh
+!.gitkeep
+!.gitignore
+!*/
+.env
+.env.*
