@@ -19,3 +19,5 @@ deadline da semana → hot.md
 projeto nomeado → projects/
 rotina → skills/
 em dúvida → pergunta
+| registrar-cerebro-valen | Chief | cérebro + git | registra e versiona |
+| mapear-operacao-valen | Chief | fontes operacionais | mapeia antes de automatizar |
