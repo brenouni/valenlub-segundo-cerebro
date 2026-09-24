@@ -4,4 +4,5 @@
 - 08:00 Relator 08h → Ariadna
 - Após o Relator: Conciliador Sinal (1x)
 - A cada 30 min (VPS): cerebro-sync pull --rebase + push
-- Mensal: faxina (archive >60d, lint MEMORY/USER, scanner de segredo — avisa, não apaga)
+- Mensal: cron cerebro-faxina — skills/cron-de-faxina.md (archive >60d, lint, scanner; avisa, não apaga)
+- Orquestrador “puxa de todos, todo dia”: só com o 2º cérebro de domínio. Hoje o Chief lê só este repo.

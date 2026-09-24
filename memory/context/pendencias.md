@@ -1,7 +1,8 @@
 # Pendências
 
 P1 desta semana (23/09):
-- [ ] Repo GitHub privado + token fine-grained no `.env` do Hermes (nunca no chat). Depois colar `skills/cron-de-sync.md` no Telegram.
+- [x] Repo GitHub privado `brenouni/valenlub-segundo-cerebro` (24/09).
+- [ ] Token fine-grained **só** no `.env` do perfil Hermes (nunca no chat). Rotacionar qualquer PAT que tenha passado no Telegram/Grok. Depois colar `skills/cron-de-sync.md`.
 
 Fila:
 - [ ] Entrevista de tela Query (Ariadna)

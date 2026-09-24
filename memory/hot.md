@@ -1,5 +1,5 @@
 # HOT — muda esta semana
 
-- Montar cérebro portátil no workspace (23/09)
-- GitHub desta sessão: conector ainda não ligado
-- Próximo ato operacional: credencial Query + sethome
+- P1: GitHub + token Hermes
+- Quatro campos business em branco: praça, volume, sistema extra, fechamento de caixa
+- Depois: Query + sethome
