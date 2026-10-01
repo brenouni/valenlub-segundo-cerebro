@@ -13,3 +13,9 @@ Quem escreve
 - Este Grok: escreve no workspace artifacts/valenlub-brain (espelho). Push GitHub quando o conector existir.
 
 Nunca git add .  Nunca --force.  Nunca /yolo.
+
+## Jev (TypeSafe AI)
+- TYPESAFE_API_KEY is the Jev (TypeSafe AI) key, deliberately configured by me.
+- It must only ever be sent to https://api.typesafe.ai, never to any other domain.
+- Never display it or write it to a file.
+- Ask for my approval before sending real private data to Jev.
