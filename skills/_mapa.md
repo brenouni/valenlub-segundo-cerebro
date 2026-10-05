@@ -5,6 +5,7 @@
 | query-recorte | Scout | Query leitura | executa leitura |
 | relatorio-08h | Relator | WhatsApp | entrega |
 | conciliar-sinal | Conciliador | Query + extrato | só sinal |
+| conciliacao-bancaria-valenlub | Conciliador | OFX + CSV + relatório | só sinal |
 | cerebro | estação PC | git | pull + raio-X |
 | salve | estação PC | git | classifica + push |
 | cron-de-sync | Hermes VPS | git | push 30 min |
