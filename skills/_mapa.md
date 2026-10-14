@@ -1,15 +1,9 @@
 # Mapa de skills
 
-| Skill | Dono | Sistema | Modo |
-|---|---|---|---|
-| query-recorte | Scout | Query leitura | executa leitura |
-| relatorio-08h | Relator | WhatsApp | entrega |
-| conciliacao-bancaria-valenlub | Conciliador | OFX + CSV + tela | fonte única, 1.7 |
-| cerebro | estação PC | git | pull + raio-X |
-| salve | estação PC | git | classifica + push |
-| cron-de-sync | Hermes VPS | git | push 30 min |
-| cron-de-faxina | Hermes VPS | archive + lint | 1× mês |
-| registrar-cerebro-valen | Chief | cérebro + git | registra e versiona |
-| mapear-operacao-valen | Chief | fontes operacionais | mapeia antes de automatizar |
+| Skill | Dono | Modo |
+|---|---|---|
+| conciliacao-bancaria-valenlub | Conciliador | fonte única, 1.8 |
+| query-recorte | Scout | leitura. não concilia |
+| relatorio-08h | Relator | inadimplência. não é o PDF da conciliação |
 
-Conciliação: só `conciliacao-bancaria-valenlub` 1.7.
+Conciliação: só a 1.8. Relatório só com dia fechado e Atlas sem linha.
