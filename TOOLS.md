@@ -1,14 +1,8 @@
 # TOOLS
 
-Permitido nesta leva
-- Query — leitura e a baixa que a skill 1.7 autoriza
-- WhatsApp — Relator 08h e avisos
-- Este cérebro (markdown + git)
+Permitido
+- Query — leitura e a baixa que a skill 1.8 autoriza
+- WhatsApp — Relator 08h
+- Este cérebro
 
-Conciliação: só a skill 1.7 decide o que grava.
-
-Fora desta leva
-- Bradesco executor
-- Tássia no circuito
-- Slack
-- Outras 7 empresas no mesmo repo
+Conciliação: só a 1.8 decide o que grava.
