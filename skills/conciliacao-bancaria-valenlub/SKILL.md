@@ -8,7 +8,6 @@ platforms: [linux]
 metadata:
   hermes:
     tags: [ValenLub, Conciliacao, Rotina]
-    related_skills: [conciliar-sinal]
 ---
 
 # Conciliação — ValenLub, caixa 4
