@@ -1,11 +1,9 @@
 # MEMORY
 
-ValenLub — 1ª onda. Query leitura. Relatório inadimplência 08h. Conciliação sinaliza-sem-baixar. Bradesco e Tássia fora.
+ValenLub — 1ª onda. Query. Relatório inadimplência 08h. Bradesco executor e Tássia fora.
 
-VOCÊ: Cléssia + Atlas. Chief porta. Financeiro domínio. Ops: Scout, Relator 08h, Conciliador Sinal.
+Conciliação: fonte única `skills/conciliacao-bancaria-valenlub/SKILL.md` versão 1.7. Este arquivo não decide baixa.
 
-Cérebro = este repo. Chat não é memória. Destino pelo MAPA. Quente → hot.md. Durável → business/people/decisoes.
+VOCÊ: Cléssia + Atlas. Chief porta. Financeiro domínio. Ops: Scout, Relator 08h.
 
-P1 da semana: GitHub privado + token no .env do Hermes. Depois cron-de-sync. Scout 07:30. Sem credencial = bloqueia.
-
-Goal 24/09: conciliação v0 aberto. Próximo = estudo da API. Não baixar. Não ligar Relator neste goal.
+Cérebro = este repo. Chat não é memória. Destino pelo MAPA.
