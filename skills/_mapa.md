@@ -4,7 +4,6 @@
 |---|---|---|---|
 | query-recorte | Scout | Query leitura | executa leitura |
 | relatorio-08h | Relator | WhatsApp | entrega |
-| conciliar-sinal | — | — | não decide. aponta a 1.7 |
 | conciliacao-bancaria-valenlub | Conciliador | OFX + CSV + tela | fonte única, 1.7 |
 | cerebro | estação PC | git | pull + raio-X |
 | salve | estação PC | git | classifica + push |
@@ -13,4 +12,4 @@
 | registrar-cerebro-valen | Chief | cérebro + git | registra e versiona |
 | mapear-operacao-valen | Chief | fontes operacionais | mapeia antes de automatizar |
 
-Conciliação: só `conciliacao-bancaria-valenlub` 1.7. Nenhuma outra skill decide baixa.
+Conciliação: só `conciliacao-bancaria-valenlub` 1.7.
