@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
-description: "Conciliação D-1 do caixa 4 ValenLub. Fonte única. Fecha linha a linha. O dia só para sem extrato ou já fechado."
-version: "1.6.0"
+description: "Conciliação D-1 do caixa 4 ValenLub. Fonte única. Fecha linha a linha. Dia fechado abre /new."
+version: "1.7.0"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -16,31 +16,34 @@ metadata:
 Fonte única. Nenhum outro arquivo decide baixa.
 Empresa: Valen Lubrificantes. Não misturar com as outras 7.
 Texto antigo de “não baixe” não vale. Par autorizado: baixa, liga, segue a próxima linha.
+Cada dia é uma sessão. Não carregue o dia anterior nesta conversa.
 
 ## O que “para” significa
 
 Para é da linha. Não é do dia.
 Esgotou o que o robô pode fazer naquele item: marque e vá para a próxima.
-Só duas coisas param o dia: sem extrato, ou dia já Conciliado com Falta 0 e Ajuste 0.
-O resto segue até a última linha. Depois, o relatório.
+Só duas coisas encerram o dia: sem extrato, ou dia já Conciliado com Falta 0 e Ajuste 0.
+O resto segue até a última linha. Depois, o relatório. Depois, `/new`.
 
 ## Modo
 
 Sem “só olhar”: rotina. Fecha e liga.
-Com “só olhar”: lista. Não grava.
+Com “só olhar”: lista. Não grava. Não abre `/new`.
 
 ## Uma passagem
 
-1. Dia Conciliado, Falta 0 e Ajuste 0: fim. “Dia fechado.”
-2. Sem extrato do dia: fim. `aguardando_extrato`.
+1. Dia Conciliado, Falta 0 e Ajuste 0: “Dia fechado.” Emita o PDF se ainda não saiu. Rode `/new`.
+2. Sem extrato do dia: fim. `aguardando_extrato`. Não rode `/new`.
 3. Recorte só o dia. Entrada = saída prova lista completa. Não é lançamento.
 4. Para cada linha: classe pelo memo, depois título, depois a regra. Uma vez.
 5. Fechou: ligue e vá à próxima. Não reabra. Sem Jev.
 6. Não fechou: marque a linha e vá à próxima. Não pare o dia.
 7. Última linha: tabela do resto. Uma ação por linha.
 8. PDF uma vez, no fim. Não reemita.
+9. Relatório entregue, dia encerrado: rode `/new`. A próxima conciliação começa em sessão limpa.
 
 Não peça OFX, conta, subconta nem “posso baixar”.
+Não rode `/new` no meio do dia. Não rode duas vezes.
 
 ## Caixa
 
@@ -115,3 +118,4 @@ Tabela só do que a linha não fechou: data, valor, classe, uma ação.
 Sem nome. Sem documento. Sem extrato inteiro.
 Rodapé: o que foi gravado. Linha ligada não é “nada foi lançado”.
 Não diga “pode baixar”.
+Depois do PDF: `/new`.
