@@ -1,8 +1,12 @@
 ---
 name: query-recorte
-description: Lê Query, grava recorte do dia no cérebro. Não baixa.
+description: "Lê Query e grava recorte do dia. Não é conciliação. A rotina vive na skill 1.7."
 ---
-1. Abrir Query com conta Ariadna.
-2. Filtrar inadimplência do dia + pagos sem baixa.
-3. Gravar memory/YYYY-MM-DD.md + JSON.
-4. Avisar Financeiro. Encerrar.
+
+Esta skill não concilia e não baixa.
+Conciliação: `skills/conciliacao-bancaria-valenlub/SKILL.md` versão 1.7.
+
+1. Abrir Query.
+2. Filtrar o recorte pedido.
+3. Gravar memory/YYYY-MM-DD.md.
+4. Encerrar.
