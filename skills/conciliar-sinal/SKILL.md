@@ -1,22 +1,21 @@
 ---
 name: conciliar-sinal
-description: Cruza título × movimento. Só sinaliza.
+description: "Veredito do cruzamento. Não decide baixa. A rotina vive em conciliacao-bancaria-valenlub 1.2."
 ---
-1. Pegar recorte.
-2. Sem extrato → aguardando_extrato.
-3. Veredito bate/duvida/nao_bate. Dúvida → Ariadna.
+
+Não use esta skill para baixar, ligar ou gravar.
+A regra viva é `skills/conciliacao-bancaria-valenlub/SKILL.md` versão 1.2.
+Se esta skill divergir, a 1.2 vence.
+
+1. Sem extrato: `aguardando_extrato`. Pare.
+2. Par único autorizado: não sinalize de novo. A 1.2 executa.
+3. Dois títulos no mesmo valor, sem título, sem NSU: `duvida`. Fila da Ariadna.
 
 ## Jev
-O Jev decide. O Hermes escreve. O Jev não baixa, não grava DNI, não importa 1104, não lança 1200.
 
-Chamar o Jev só depois do match por regra, e só na linha que não fechou em bate.
-Uma chamada jev-latest por linha, com descrição, valor e data. Nada de nome de cliente, documento ou extrato inteiro.
-Perguntas, nesta ordem:
-- tipo (choice): pix, boleto, cartao, tarifa, aplicacao, resgate, dni, outro
-- veredito (choice): duvida, nao_bate
-- merece humano hoje (noul)
-- risco de baixa errada (noul)
-
-Não chamar se o extrato não chegou, se a regra já deu bate, se há dois títulos no mesmo valor, se falta NSU no cartão, ou se o pedido for baixar, estornar ou gravar.
-Confidence abaixo de 0,6 em qualquer pergunta: veredito = duvida, parar, fila da Ariadna.
-A chave só vai para https://api.typesafe.ai. Nunca exibir. Dado privado real só com aprovação do Breno.
+Só na linha que a 1.2 não fechou.
+Não chame se a regra já fechou, se há dois títulos iguais, se falta NSU, ou se o dia já está Conciliado.
+Uma chamada. Só descrição, valor e data. Sem nome, documento ou extrato.
+Confidence abaixo de 0,6: `duvida`, pare.
+Jev não baixa, não grava DNI, não importa 1104.
+Chave só para https://api.typesafe.ai. Nunca exibir.
