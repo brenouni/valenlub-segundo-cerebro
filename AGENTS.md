@@ -5,8 +5,7 @@
 3. MAPA.md
 4. TOOLS.md
 5. HEARTBEAT.md
-6. memory/hot.md + pendencias.md
+6. memory/hot.md
 
-Conciliação: depois do boot, só `skills/conciliacao-bancaria-valenlub/SKILL.md` versão 1.7. Nenhum arquivo acima decide baixa.
-
-Nunca git add .  Nunca --force.  Nunca /yolo.
+Conciliação: depois do boot, só a skill 1.8. Nenhum arquivo acima decide baixa.
+Relatório só com dia fechado e Atlas sem linha.
