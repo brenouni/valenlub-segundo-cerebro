@@ -1,6 +1,4 @@
-# HOT — muda esta semana
+# HOT
 
-- P1: GitHub + token Hermes
-- Quatro campos business em branco: praça, volume, sistema extra, fechamento de caixa
-- Depois: Query + sethome
-- Goal aberto: conciliação (conciliacao.md). Próximo = API. Sem Relator neste goal.
+Conciliação: `skills/conciliacao-bancaria-valenlub/SKILL.md` versão 1.7. Única regra.
+Não existe conciliacao.md.
