@@ -16,6 +16,7 @@ O que procurar e onde. Não leia o repo inteiro.
 | Fila humana | memory/context/pendencias.md |
 | Deadline desta semana | memory/hot.md |
 | Projeto nomeado | memory/projects/ |
+| Conciliação do caixa 4 | skills/conciliacao-bancaria-valenlub/SKILL.md versão 1.7. Única regra. |
 | Recorte Query do dia (servidor) | memory/YYYY-MM-DD.md |
 | Nota do PC Atlas | memory/YYYY-MM-DD-local.md |
 | Skill repetível | skills/<nome>/ |
@@ -27,6 +28,5 @@ O que procurar e onde. Não leia o repo inteiro.
 
 Índice por pasta: cada pasta tem `_index.md`.
 
-Arquitetura alvo (aula): Vendas · Financeiro · Operação → orquestrador puxa todo dia → cérebro geral.
-Hoje este repo É o Cérebro · Financeiro. Irmãos Vendas/Operação/Geral: nenhum até o 2º domínio ganhar leva.
+Na conciliação, a skill 1.7 vence este MAPA, o SOUL e o MEMORY.
 Hotel, log, loteria, shopping — fora.
