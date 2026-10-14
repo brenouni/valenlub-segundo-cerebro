@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
-description: "Conciliação D-1 do caixa 4 ValenLub. Fonte única. Fecha linha a linha. Dia fechado abre /new."
-version: "1.7.0"
+description: "Conciliação D-1 do caixa 4 ValenLub. Fonte única. Relatório só com dia fechado e Atlas sem linha."
+version: "1.8.0"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -21,25 +21,32 @@ Cada dia é uma sessão. Não carregue o dia anterior nesta conversa.
 
 Para é da linha. Não é do dia.
 Esgotou o que o robô pode fazer naquele item: marque e vá para a próxima.
-Só duas coisas encerram o dia: sem extrato, ou dia já Conciliado com Falta 0 e Ajuste 0.
-O resto segue até a última linha. Depois, o relatório. Depois, `/new`.
+O dia só encerra sem extrato, ou Conciliado com Falta 0, Ajuste 0 e tabela vazia.
+
+## Relatório
+
+Só sai quando as duas forem verdade:
+1. O dia está Conciliado por nós. Falta 0. Ajuste 0.
+2. O Atlas não tem mais linha. A tabela do resto está vazia.
+
+Sobrou linha: sem PDF. Sem `/new`. Entregue a tabela e pare nessa sessão.
+PDF uma vez. Não reemita. Depois do PDF: `/new`.
 
 ## Modo
 
 Sem “só olhar”: rotina. Fecha e liga.
-Com “só olhar”: lista. Não grava. Não abre `/new`.
+Com “só olhar”: lista. Não grava. Sem PDF. Sem `/new`.
 
 ## Uma passagem
 
-1. Dia Conciliado, Falta 0 e Ajuste 0: “Dia fechado.” Emita o PDF se ainda não saiu. Rode `/new`.
-2. Sem extrato do dia: fim. `aguardando_extrato`. Não rode `/new`.
+1. Dia já Conciliado, Falta 0, Ajuste 0, tabela vazia: PDF se ainda não saiu. `/new`.
+2. Sem extrato do dia: fim. `aguardando_extrato`. Sem PDF. Sem `/new`.
 3. Recorte só o dia. Entrada = saída prova lista completa. Não é lançamento.
 4. Para cada linha: classe pelo memo, depois título, depois a regra. Uma vez.
 5. Fechou: ligue e vá à próxima. Não reabra. Sem Jev.
 6. Não fechou: marque a linha e vá à próxima. Não pare o dia.
-7. Última linha: tabela do resto. Uma ação por linha.
-8. PDF uma vez, no fim. Não reemita.
-9. Relatório entregue, dia encerrado: rode `/new`. A próxima conciliação começa em sessão limpa.
+7. Última linha: se a tabela tem linha, entregue e pare. Sem PDF. Sem `/new`.
+8. Tabela vazia e dia Conciliado: PDF. Depois `/new`.
 
 Não peça OFX, conta, subconta nem “posso baixar”.
 Não rode `/new` no meio do dia. Não rode duas vezes.
@@ -62,7 +69,7 @@ Não chute só pelo valor.
 
 ## Classes
 
-Lote. Memo `LIQUIDACAO DE COBRANCA`. Não busque um título do valor da linha. Some só as linhas de pagamento. Soma exata: ligue e siga. Não mande à Ariadna só porque a linha não foi aberta.
+Lote. Memo `LIQUIDACAO DE COBRANCA`. Não busque um título do valor da linha. Some só as linhas de pagamento. Soma exata: ligue e siga.
 
 Pix recebido. Memo `PIX RECEBIDO` ou `PIX QR`. Título no receber.
 Um do valor, aberto: juros 0, multa 0, baixe, ligue, siga.
@@ -77,7 +84,7 @@ CSV bruto: ignore até `Data de pagamento;`. `Data de pagamento:` é filtro.
 Banco junta. Cielo não. Valor sozinho ausente: some mesmo dia e mesma bandeira.
 
 Tarifa. Memo `TARIFA`. Botão Tarifa da linha. Bradesco, 30060001, caixa 4, data do extrato.
-Baixe, ligue e siga. Não lance outra. Não devolva.
+Baixe, ligue e siga. Não lance outra.
 0,55 da mesma descrição já existente: não duplique. Marque e siga.
 
 Centavo. Só com título único já achado, ou com par já separado por nome. Ajuste para o valor do banco, juros 0, multa 0, baixe, ligue e siga.
@@ -106,15 +113,13 @@ Não estorna. Não entra no banco. Não grava DNI. Não fala com cliente. Não p
 ## Jev
 
 Só na linha que esta skill não fechou, e só depois de esgotar a regra.
-Não chame em lote somado, tarifa, par já ligado, dia fechado ou “só olhar”.
+Não chame em lote somado, tarifa, par já ligado ou “só olhar”.
 Uma chamada. Descrição, valor, data. Sem nome, documento ou extrato.
 Confidence abaixo de 0,6: marque `duvida` e siga.
 
-## Saída — só no fim
+## Saída
 
-Dia. Caixa 4. Totais do recorte.
-Tabela só do que a linha não fechou: data, valor, classe, uma ação.
+Dia aberto: data, caixa 4, tabela do resto. Uma ação por linha. Sem PDF.
+Dia fechado: PDF. Rodapé com o que foi gravado. Depois `/new`.
 Sem nome. Sem documento. Sem extrato inteiro.
-Rodapé: o que foi gravado. Linha ligada não é “nada foi lançado”.
 Não diga “pode baixar”.
-Depois do PDF: `/new`.
