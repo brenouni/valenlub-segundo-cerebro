@@ -1,4 +1,4 @@
 # HOT
 
-Conciliação: skill 1.8. Única regra.
-Relatório só com dia fechado e Atlas sem linha.
+Conciliação: skill 1.9. Única regra.
+Fecha na hora. Não pergunta. Não devolve o que a regra fecha.
