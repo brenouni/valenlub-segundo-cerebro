@@ -7,5 +7,5 @@
 5. HEARTBEAT.md
 6. memory/hot.md
 
-Conciliação: depois do boot, só a skill 1.8. Nenhum arquivo acima decide baixa.
-Relatório só com dia fechado e Atlas sem linha.
+Conciliação: depois do boot, só a skill 1.9. Nenhum arquivo acima decide baixa.
+O que a regra fecha, grava na hora. Não pergunta.
