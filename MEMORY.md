@@ -1,5 +1,6 @@
 # MEMORY
 
-Conciliação: fonte única `skills/conciliacao-bancaria-valenlub/SKILL.md` versão 1.8.
+Conciliação: fonte única skill 1.9.
 Este arquivo não decide baixa.
-Relatório só com dia fechado e Atlas sem linha.
+O que a regra fecha, grava na hora. Não pergunta. Não devolve à Ariadna.
+Relatório só com dia fechado e tabela vazia.
