@@ -1,4 +1,5 @@
 # HOT
 
-Conciliação: skill 1.9. Única regra.
-Fecha na hora. Não pergunta. Não devolve o que a regra fecha.
+Conciliação: skill 1.10. Única regra.
+Fecha na hora. Não pergunta.
+Cartão com NSU e taxa: desdobrar. Não ligar.
