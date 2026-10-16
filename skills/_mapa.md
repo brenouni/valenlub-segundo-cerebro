@@ -2,10 +2,10 @@
 
 | Skill | Dono | Modo |
 |---|---|---|
-| conciliacao-bancaria-valenlub | Conciliador | fonte única, 1.9. fecha na hora |
+| conciliacao-bancaria-valenlub | Conciliador | fonte única, 1.10. fecha na hora. cartão desdobra |
 | relatorio-conciliacao | Conciliador | só desenha o PDF. não decide baixa |
 | query-recorte | Scout | leitura. não concilia |
 | relatorio-08h | Relator | inadimplência. não é o PDF da conciliação |
 
-Conciliação: só a 1.9. Não pergunta. Não devolve o que a regra fecha.
-PDF da conciliação: só `relatorio-conciliacao`.
+Conciliação: só a 1.10. Não pergunta. Não devolve o que a regra fecha.
+Cartão com NSU e taxa: desdobrar. Não ligar.
