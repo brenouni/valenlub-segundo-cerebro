@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
-description: "Conciliação D-1 do caixa 4 ValenLub. Fecha na hora. Releitura antes de entregar. PDF no fim."
-version: "1.12.0"
+description: "Conciliação D-1 do caixa 4 ValenLub. Fecha na hora. Releitura antes de entregar. NSU dentro do título."
+version: "1.13.0"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -80,9 +80,11 @@ Data no histórico não é a data do pagamento.
 Cartão. Memo `CIELO` ou `COMPRA CARTAO`. Não lance recebimento. Não entre no portal. Não importe a 1104.
 Abra o CSV. Ignore até `Data de pagamento;`.
 1. Título do mesmo valor líquido e do mesmo NSU: ligue e siga.
-2. NSU igual e o título está no bruto, ou no total da venda, e a diferença é a taxa da linha do CSV: marque `desdobrar`. Não ligue. A Ariadna desdobra. Depois ligue.
-3. Sem NSU e sem título do líquido: marque em falta e siga.
+2. Filtro do NSU vazio e um título só no valor líquido: abra o título. Procure o NSU lá dentro. Achou o mesmo: ligue e siga. Não achou: marque.
+3. NSU igual e o título está no bruto, ou no total da venda, e a diferença é a taxa da linha do CSV: marque `desdobrar`. Não ligue. A Ariadna desdobra. Depois ligue.
+4. Sem NSU e sem título do líquido: marque em falta e siga.
 Banco junta. Cielo não. Valor sozinho ausente: some mesmo dia e mesma bandeira.
+Exemplo do 07/10: débito 11,93, NSU 706662. Filtro vazio. Um título no líquido. Abrir e procurar o NSU dentro.
 
 Tarifa. Memo `TARIFA`. Botão Tarifa da linha. Bradesco, 30060001, caixa 4, data do extrato.
 Baixe, ligue e siga. Não lance outra.
@@ -109,6 +111,7 @@ Outro: marque `duvida` e siga.
 Não estorna. Não entra no banco. Não grava DNI. Não fala com cliente. Não pede senha.
 Não pare para perguntar. Não espere o Breno insistir.
 Não desdobre sozinho. Não importe o arquivo da Cielo.
+Não ligue cartão só pelo valor. O NSU tem que aparecer no título.
 
 ## Saída
 
