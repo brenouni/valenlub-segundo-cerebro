@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
-description: "Conciliação D-1 do caixa 4 ValenLub. Fecha na hora. NSU no bruto: desdobrar. Não sobrescreve rascunho."
-version: "1.15.0"
+description: "Conciliação D-1 do caixa 4 ValenLub. Cartão: banco + taxa = título, fecha. Não devolve."
+version: "1.16.0"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -12,74 +12,56 @@ metadata:
 
 # Conciliação — ValenLub, caixa 4
 
-Fonte única. Nenhum outro arquivo decide baixa. `leitura-query` não decide. `relatorio-conciliacao` não decide.
-Empresa: Valen Lubrificantes. Não misturar com as outras 7.
-Texto antigo de “não baixe” não vale. Texto antigo de “NSU no bruto = falta” não vale.
+Fonte única. Nenhum outro arquivo decide baixa.
+Texto antigo de “desdobrar e devolver” não vale. Texto antigo de “não desdobre sozinho” não vale quando a conta fecha.
 
 ## Fecha na hora. Não pergunta.
 
-A regra já foi decidida. Não peça confirmação. Não pare no meio. Não devolva à Ariadna o que a regra fecha.
-O que a regra fecha: baixe, ligue e vá à próxima linha. Na mesma passagem.
-Não espere o Breno dizer “resolve o que falta”. Isso já é a passagem.
+O que a regra fecha, grava na hora. Não devolva à Ariadna.
+Não espere o Breno insistir.
 
 ## Rascunho
 
-Antes de clicar na tela, apague `/home/hermes/.hermes/cache/scratch/query-browser`.
-Não sobrescreva script que já existe. Se existir, use outro nome.
-O aviso de file-mutation não é falha da conciliação. Não pare por causa dele.
+Antes de clicar, apague `/home/hermes/.hermes/cache/scratch/query-browser`.
+Não sobrescreva script. Se existir, use outro nome.
+Aviso de file-mutation não é falha. Não pare.
 
 ## Relatório
 
-O gerador está no cérebro: `skills/relatorio-conciliacao/gerar.py`.
-Não procure em outra pasta. Não monte o PDF na mão.
-Só depois da releitura. Não espere pedido.
-Dia aberto: selo âmbar. Sem `/new`.
-Dia fechado: selo verde. Escreva “Dia fechado. Mande /new.”
+Gerador: `skills/relatorio-conciliacao/gerar.py`. Não monte na mão.
+Só depois da releitura. Dia aberto: âmbar. Dia fechado: verde.
 
 ## Antes de entregar
 
-A passagem não acaba na primeira tentativa.
-Depois da última linha, não entregue. Não gere o PDF ainda.
-Releia só o que ficou em falta.
-Painel que não carregou: abra de novo. Uma vez. Depois busque o título pelo valor.
-Se a regra fecha nessa releitura, feche. Não peça.
-Só entregue o que a releitura também não fechou.
+Releia o que ficou. Painel que não carregou: abra de novo. Busque pelo valor.
+Se a regra fecha, feche. Só entregue o que a releitura não fechou.
 
-## Uma passagem
+## Cartão
 
-1. Apague o rascunho.
-2. Sem extrato do dia: fim. Sem PDF.
-3. Recorte só o dia. Entrada = saída prova lista completa.
-4. Para cada linha: classe, título, regra.
-5. Fechou: ligue e vá à próxima.
-6. Não fechou: marque e vá à próxima. Não pare o dia.
-7. Última linha: releitura. Feche o que a regra fecha.
-8. Só então o PDF. Âmbar se sobrou. Verde se fechou.
+Não lance recebimento. Não entre no portal. Não importe a 1104.
+Abra o CSV. Ignore até `Data de pagamento;`.
 
-## Classes
+1. Título no líquido e NSU igual: ligue.
+2. Filtro vazio e um título no líquido: abra e procure o NSU. Achou no líquido: ligue.
+3. NSU igual e título no bruto, ou no total da venda. Banco + taxa do CSV = valor do título, no centavo: feche.
+   Ajuste o título para o valor do banco. Juros 0. Multa 0.
+   Lance a taxa em 30010004, caixa 4, data do extrato.
+   Ligue a linha do banco. Não devolva.
+4. A conta não fecha no centavo: marque `desdobrar` e entregue. Aí a Ariadna faz.
+5. Sem NSU e sem título do líquido: marque.
+
+Exemplo do 07/10: banco 11,93 + taxa 0,09 = título 89490 de 12,02. NSU 706662. Fecha. Não devolve.
+
+## Demais classes
 
 Lote. Some só os pagamentos. Soma exata: ligue.
-
-Pix recebido. Um do valor, aberto: juros 0, multa 0, baixe, ligue. Já pago: só ligue.
-Vários do mesmo valor: eliminação por nome.
-Sem título, depois do painel e da busca: proponha DNI. Não grave.
-
-Cartão. Não lance recebimento.
-1. Líquido e NSU iguais: ligue.
-2. Filtro vazio e um título no líquido: abra e procure o NSU. Achou no líquido: ligue.
-3. NSU achado no título do bruto, ou do total, e a diferença é a taxa: `desdobrar`. Não é falta. Não ligue. Entregue título, valor do título, valor do banco e taxa.
-4. Sem NSU e sem título do líquido: marque.
-Exemplo do 07/10: 11,93. NSU 706662 no título 89490, bruto 12,02. Taxa 0,09. É desdobrar.
-
-Tarifa. Botão Tarifa. Bradesco, 30060001, caixa 4, data do extrato. Baixe e ligue. Não lance outra.
-
-Pagamento e Pix enviado. Título único aberto: baixe e ligue. Valor repetido: eliminação por nome. Nada achado: não lance pessoa.
-
+Pix recebido. Um do valor, aberto: juros 0, multa 0, baixe, ligue. Já pago: só ligue. Vários: eliminação por nome. Sem título: proponha DNI. Não grave.
+Tarifa. Botão Tarifa. 30060001, caixa 4, data do extrato. Baixe e ligue.
+Pagamento e Pix enviado. Título único aberto: baixe e ligue. Nada achado: não lance pessoa.
 Aplicação. Sem linha, não crie.
 Resgate. Sem relatório prévio. Não peça.
 
 ## Não fazer
 
-Não estorna. Não grava DNI. Não desdobra sozinho. Não importe a Cielo.
-Não marque falta quando o NSU está no bruto e a diferença é a taxa.
-Não pare por causa do aviso de file-mutation.
+Não estorna. Não grava DNI. Não importe a Cielo.
+Não devolva cartão quando banco + taxa = título.
