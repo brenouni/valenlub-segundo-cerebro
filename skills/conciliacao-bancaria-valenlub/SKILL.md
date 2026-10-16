@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
-description: "Conciliação D-1 do caixa 4 ValenLub. Fecha na hora o que a regra fecha. Não pergunta. Não devolve à Ariadna."
-version: "1.9.1"
+description: "Conciliação D-1 do caixa 4 ValenLub. Fecha na hora. Cartão com NSU e taxa: desdobrar, não ligar."
+version: "1.10.0"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -14,7 +14,7 @@ metadata:
 
 Fonte única. Nenhum outro arquivo decide baixa. `leitura-query` não decide. `relatorio-conciliacao` não decide.
 Empresa: Valen Lubrificantes. Não misturar com as outras 7.
-Texto antigo de “não baixe” não vale.
+Texto antigo de “não baixe” não vale. Texto antigo de “NSU e valor diferentes = falta” não vale.
 
 ## Fecha na hora. Não pergunta.
 
@@ -85,9 +85,11 @@ Data no histórico não é a data do pagamento.
 
 Cartão. Memo `CIELO` ou `COMPRA CARTAO`. Não lance recebimento. Não entre no portal. Não importe a 1104.
 Abra o CSV. Ignore até `Data de pagamento;`. `Data de pagamento:` é filtro.
-Ache o título do mesmo valor líquido e do mesmo NSU. Achou: ligue e siga. Não devolva.
-Sem esse título: marque em falta e siga.
+1. Título do mesmo valor líquido e do mesmo NSU: ligue e siga. Não devolva.
+2. NSU igual e o título está no bruto, ou no total da venda, e a diferença é a taxa da linha do CSV: marque `desdobrar`. Não ligue. Não lance recebimento. Entregue título, valor do título, valor do banco e taxa. A Ariadna desdobra. Depois ligue.
+3. Sem NSU e sem título do líquido: marque em falta e siga.
 Banco junta. Cielo não. Valor sozinho ausente: some mesmo dia e mesma bandeira.
+Exemplo do 06/10: débito 84,32 NSU 734479 no título 84,95. Crédito 395,31 NSU 734198 no título 1.631,84. Os dois são desdobrar.
 
 Tarifa. Memo `TARIFA`. Botão Tarifa da linha. Bradesco, 30060001, caixa 4, data do extrato.
 Baixe, ligue e siga. Não lance outra. Não devolva.
@@ -118,17 +120,19 @@ Outro: marque `duvida` e siga.
 
 Não estorna. Não entra no banco. Não grava DNI. Não fala com cliente. Não pede senha. Não grava token.
 Não pare para perguntar. Não espere o Breno insistir.
+Não desdobre sozinho. Não importe o arquivo da Cielo.
 
 ## Jev
 
 Só na linha que esta skill não fechou, e só depois de esgotar a regra.
-Não chame em lote somado, tarifa, par já ligado ou “só olhar”.
+Não chame em lote somado, tarifa, par já ligado, desdobrar ou “só olhar”.
 Uma chamada. Descrição, valor, data. Sem nome, documento ou extrato.
 Confidence abaixo de 0,6: marque `duvida` e siga.
 
 ## Saída
 
 Dia aberto: data, caixa 4, tabela do resto. Uma ação por linha. PDF só se o Breno pedir, pela skill do relatório.
+Linha `desdobrar`: título, valor do título, valor do banco, taxa. Uma ação: a Ariadna desdobra.
 Dia fechado: PDF pela skill do relatório. Rodapé com o que foi gravado. Depois `/new`.
 Sem documento. Sem extrato inteiro.
 Não diga “pode baixar”. Linha ligada não é “nada foi lançado”.
