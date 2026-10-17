@@ -1,6 +1,6 @@
 # Pendências
 
-Não decide conciliação. A rotina é a skill 1.23.
+Não decide conciliação. A rotina é a skill 1.24.
 
 - [ ] Token no .env do Hermes
 - [ ] WhatsApp do Relator 08h
