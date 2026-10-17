@@ -1,4 +1,3 @@
 # valenlub-segundo-cerebro
 
-Conciliação: skill 1.24. Única regra.
-Este arquivo não decide baixa.
+Conciliação: skill 1.25. Única regra. O script decide.
