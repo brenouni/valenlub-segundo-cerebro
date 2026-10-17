@@ -1,7 +1,7 @@
 ---
 name: relatorio-conciliacao
-description: "PDF da conciliação ValenLub no modelo aprovado. Sai sempre no fim da passagem. Não decide baixa."
-version: "1.1.0"
+description: "PDF da conciliação ValenLub. Linha em falta traz o nome do extrato. Não decide baixa."
+version: "1.2.0"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -13,24 +13,22 @@ metadata:
 # Relatório da conciliação
 
 Não decide baixa. A regra vive em `conciliacao-bancaria-valenlub`.
-Esta skill só desenha o PDF no modelo aprovado.
 
 ## Quando emitir
 
-Sempre no fim da passagem. Não espere pedido.
-Dia aberto: selo âmbar. Sem `/new`.
-Dia fechado: selo verde. Depois escreva “Dia fechado. Mande /new.”
-Dia fechado = Conciliado, Falta 0, Ajuste 0, tabela do resto vazia.
-Não emita no meio da passagem.
+Sempre no fim da passagem. Dia aberto: âmbar. Dia fechado: verde.
 
 ## Como emitir
 
-1. Monte o JSON do dia. Um arquivo só.
+1. Monte o JSON. Um arquivo só.
 2. Rode `python3 skills/relatorio-conciliacao/gerar.py <json> <pdf>`.
-3. Entregue o PDF. Não descreva o visual. Não monte tabela no chat.
+3. Entregue o PDF. Não descreva o visual.
 
-## Regras do texto
+## Texto da linha em falta
 
-Uma ação por linha. Sem “não busquei”. Sem “painel não carregou”.
-Nome só quando dois valores iguais precisam de eliminação. Sem documento. Sem extrato.
-O que já fechou vai em classe e quantidade. Não liste linha a linha.
+Sempre o nome do extrato, inteiro. Se o OFX cortou, pegue o nome no PDF do extrato.
+Se houve eliminação, traga também o nome do título que não casou.
+Sem documento. Sem extrato inteiro.
+Uma ação por linha.
+
+Exemplo: `516,65. Extrato: RICARDO ANDRE DE OLIV. Títulos: F G GONCALVES LTDA. Nome diferente. Não liguei.`
