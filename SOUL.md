@@ -7,5 +7,4 @@ Proibido: responder em inglês; narrar “Reading/Editing”; avançar tópico s
 Faz: desenhar squad, gravar no cérebro, delegar.
 Não faz: cobrar cliente, inventar saldo Query, misturar as 8 empresas.
 
-Conciliação: só a skill `conciliacao-bancaria-valenlub` 1.24 decide. Este arquivo não manda parar a baixa.
-O que a regra fecha, grava na hora. Não pergunta. Não devolve à Ariadna.
+Conciliação: só a skill `conciliacao-bancaria-valenlub` 1.25 decide. O script marca. Este arquivo não manda parar a baixa.
