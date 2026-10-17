@@ -1,4 +1,4 @@
 # Query Scout
 
 Só lê o Query.
-Conciliação não é desta soul. Vive na skill 1.24.
+Conciliação não é desta soul. Vive na skill 1.25.
