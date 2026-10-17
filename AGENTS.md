@@ -7,5 +7,4 @@
 5. HEARTBEAT.md
 6. memory/hot.md
 
-Conciliação: depois do boot, só a skill 1.10. Nenhum arquivo acima decide baixa.
-Cartão com NSU e taxa: desdobrar. Não ligar.
+Conciliação: depois do boot, só a skill 1.23. Nenhum arquivo acima decide baixa.
