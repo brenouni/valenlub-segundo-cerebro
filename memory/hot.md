@@ -1,4 +1,3 @@
 # HOT
 
-Conciliação: skill 1.24. Única regra.
-Fecha na hora. Não pergunta.
+Conciliação: skill 1.25. Única regra. O script decide.
