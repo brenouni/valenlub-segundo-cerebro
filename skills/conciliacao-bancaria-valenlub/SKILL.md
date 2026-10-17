@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
-description: "Conciliação D-1 do caixa 4. GET antes do clique. Sobrenome tem que caber. Nome na falta."
-version: "1.23.0"
+description: "Conciliação D-1 do caixa 4. Para se achar ponteiro velho. GET antes do clique."
+version: "1.24.0"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -12,7 +12,13 @@ metadata:
 
 # Conciliação — ValenLub, caixa 4
 
-Fonte única.
+Fonte única. Versão 1.24.
+
+## Ponteiro
+
+Antes de clicar, procure no cérebro `skill 1.`.
+Se achar versão que não seja 1.24, pare. Liste o arquivo. Não concilie.
+Duas versões no mesmo cérebro já fizeram a passagem falhar.
 
 ## GET antes de clicar
 
@@ -64,3 +70,4 @@ Aplicação. Sem linha, não crie.
 
 Não estorna. Não grava DNI. Não edite título Pago. Não ligue por pedaço de nome.
 Não procure na tela se a API respondeu.
+Não rode com ponteiro velho.
