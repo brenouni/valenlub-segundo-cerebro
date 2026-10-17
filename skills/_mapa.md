@@ -2,9 +2,9 @@
 
 | Skill | Dono | Modo |
 |---|---|---|
-| conciliacao-bancaria-valenlub | Conciliador | fonte única, 1.24. fecha na hora |
-| relatorio-conciliacao | Conciliador | só desenha o PDF. não decide baixa |
+| conciliacao-bancaria-valenlub | Conciliador | fonte única, 1.25. o script decide |
+| relatorio-conciliacao | Conciliador | só desenha o PDF |
 | query-recorte | Scout | leitura. não concilia |
-| relatorio-08h | Relator | inadimplência. não é o PDF da conciliação |
+| relatorio-08h | Relator | inadimplência |
 
-Conciliação: só a 1.24. Não pergunta. Não devolve o que a regra fecha.
+Conciliação: só a 1.25.
