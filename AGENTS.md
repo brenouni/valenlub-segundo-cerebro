@@ -7,4 +7,4 @@
 5. HEARTBEAT.md
 6. memory/hot.md
 
-Conciliação: depois do boot, só a skill 1.23. Nenhum arquivo acima decide baixa.
+Conciliação: depois do boot, só a skill 1.24. Nenhum arquivo acima decide baixa.
