@@ -1,3 +1,3 @@
 # valenlub-segundo-cerebro
 
-Conciliação: skill 1.25. Única regra. O script decide.
+Conciliação: skill 1.27. Única regra. Anexo sem texto já concilia.
