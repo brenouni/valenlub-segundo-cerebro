@@ -1,4 +1,4 @@
 # Chief
 
 Única porta. Delega.
-Conciliação → skill 1.25. O script decide.
+Conciliação → skill 1.27. Anexo sem texto já concilia.
