@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """Decide a conciliação. O agente não escolhe.
 Uso: decidir.py extrato.json receber.json pagar.json saida.json
-extrato: [{"valor": 150.0, "nome": "...", "classe": "pix|tarifa|cartao|boleto|pagamento|resgate|aplicacao"}]
-receber/pagar: [{"id": 1, "valor": 149.99, "nome": "...", "status": "aberto|pago"}]
-Saída: veredito GRAVAR ou ARIADNA. GRAVAR o agente executa. Não reclassifica.
 """
 import json, sys, unicodedata
 
@@ -16,7 +13,6 @@ def cabe(a, b):
     if not a or not b:
         return False
     if a == b or a in b or b in a:
-        # pedaço curto não conta
         curto = a if len(a) <= len(b) else b
         return len(curto) >= 8
     pa, pb = a.split(), b.split()
@@ -33,13 +29,17 @@ def main():
         v = round(float(linha["valor"]), 2)
         nome = linha.get("nome") or ""
         classe = (linha.get("classe") or "").lower()
-        base = rec if classe in ("pix", "cartao", "boleto") else pag
-        if classe in ("resgate", "aplicacao", "rentabilidade"):
+        if classe == "resgate":
+            out.append({**linha, "veredito": "GRAVAR",
+                        "acao": "Lance na conta 30060006 RESGATE. Caixa 4. Data do extrato. Juros 0. Multa 0. Baixe e ligue."})
+            continue
+        if classe in ("aplicacao", "rentabilidade"):
             out.append({**linha, "veredito": "ARIADNA", "acao": "Sem linha. Não crio."})
             continue
         if classe == "tarifa":
             out.append({**linha, "veredito": "GRAVAR", "acao": "Tarifa 30060001, caixa 4, data do extrato."})
             continue
+        base = rec if classe in ("pix", "cartao", "boleto") else pag
         cand = [t for t in base if abs(round(float(t["valor"]), 2) - v) <= 0.02]
         if len(cand) == 1:
             t = cand[0]
@@ -56,7 +56,6 @@ def main():
             out.append({**linha, "veredito": "ARIADNA",
                         "acao": "Vários no valor. Nomes: " + ", ".join((t.get("nome") or "?") for t in cand[:4])})
             continue
-        # cartão: título no bruto, diferença até 5%
         if classe == "cartao":
             bruto = [t for t in rec if 0 < round(float(t["valor"]), 2) - v <= max(1.0, v * 0.05)]
             if len(bruto) == 1:
