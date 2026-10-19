@@ -1,3 +1,3 @@
 # valenlub-segundo-cerebro
 
-Conciliação: skill 1.29. Única regra. Lote de boleto é soma.
+Conciliação: skill 1.30. Única regra. Cartão somado desdobra.
