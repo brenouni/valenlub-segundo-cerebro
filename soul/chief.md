@@ -1,4 +1,4 @@
 # Chief
 
 Única porta. Delega.
-Conciliação → skill 1.28. Resgate nasce na 1100.
+Conciliação → skill 1.29. Lote de boleto é soma.
