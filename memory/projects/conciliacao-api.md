@@ -1,9 +1,9 @@
 # API Query — leitura da conciliação
 
-Não decide baixa. A regra é a skill 1.27.
+Não decide baixa. A regra é a skill 1.28.
 
 - Base: `https://backend.acessoquery.com/api`
 - Toda chamada: `X-Tenant` + Bearer de `POST /login`.
 - Antes de clicar: `GET /contas-receber` e `GET /contas-a-pagar`.
 - `dt_baixa_fim` = dia seguinte.
-- O script decide. A tela só grava.
+- Resgate nasce na 1100. O script decide. A tela só grava.
