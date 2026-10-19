@@ -1,3 +1,3 @@
 # HOT
 
-Conciliação: skill 1.27. Anexo sem texto já concilia. Resgate na 30060006.
+Conciliação: skill 1.28. Anexo sem texto já concilia. Resgate nasce na 1100, conta 30060006.
