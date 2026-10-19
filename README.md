@@ -1,3 +1,3 @@
 # valenlub-segundo-cerebro
 
-Conciliação: skill 1.27. Única regra. Anexo sem texto já concilia.
+Conciliação: skill 1.28. Única regra. Resgate nasce na 1100.
