@@ -18,15 +18,44 @@ def cabe(a, b):
         return False
     return pa[0] == pb[0] and any(x in b for x in pa[1:]) and len(pa[0]) >= 4
 
+def pares_cartao(ext, rec):
+    """Duas linhas de cartão cuja soma é um título."""
+    cart = [(i, round(float(l["valor"]), 2)) for i, l in enumerate(ext)
+            if (l.get("classe") or "").lower() == "cartao"]
+    usado, mapa = set(), {}
+    for a in range(len(cart)):
+        ia, va = cart[a]
+        if ia in usado:
+            continue
+        for b in range(a + 1, len(cart)):
+            ib, vb = cart[b]
+            if ib in usado:
+                continue
+            soma = round(va + vb, 2)
+            tit = [t for t in rec if abs(round(float(t["valor"]), 2) - soma) <= 0.02]
+            if len(tit) == 1:
+                t = tit[0]
+                acao = (f"Desdobre o título {t.get('id')} de {t['valor']} "
+                        f"em {va:.2f} e {vb:.2f}. Ligue cada linha.")
+                mapa[ia] = {"id": t.get("id"), "acao": acao}
+                mapa[ib] = {"id": t.get("id"), "acao": acao}
+                usado.update((ia, ib))
+                break
+    return mapa
+
 def main():
     ext = json.load(open(sys.argv[1], encoding="utf-8"))
     rec = json.load(open(sys.argv[2], encoding="utf-8"))
     pag = json.load(open(sys.argv[3], encoding="utf-8"))
+    desdobra = pares_cartao(ext, rec)
     out = []
-    for linha in ext:
+    for i, linha in enumerate(ext):
         v = round(float(linha["valor"]), 2)
         nome = linha.get("nome") or ""
         classe = (linha.get("classe") or "").lower()
+        if i in desdobra:
+            out.append({**linha, "veredito": "GRAVAR", **desdobra[i]})
+            continue
         if classe in ("boleto", "liquidacao"):
             out.append({**linha, "veredito": "GRAVAR",
                         "acao": "Lote. Não procure um título neste valor. Selecione os recebimentos do dia. Desmarque cartão. Se a soma bater no centavo, ligue."})
