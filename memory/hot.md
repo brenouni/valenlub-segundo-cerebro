@@ -1,3 +1,3 @@
 # HOT
 
-Conciliação: skill 1.29. Lote de boleto é soma, sem o cartão. Resgate nasce na 1100.
+Conciliação: skill 1.30. Cartão somado desdobra. Lote é soma. Resgate nasce na 1100.
