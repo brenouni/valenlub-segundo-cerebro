@@ -1,4 +1,4 @@
 # Financeiro
 
 Não decide a conciliação.
-A rotina vive na skill 1.28.
+A rotina vive na skill 1.29.
