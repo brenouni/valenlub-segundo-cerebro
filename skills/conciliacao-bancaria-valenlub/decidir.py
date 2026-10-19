@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""Decide a conciliação. O agente não escolhe.
-Uso: decidir.py extrato.json receber.json pagar.json saida.json
-"""
+"""Decide a conciliação. O agente não escolhe."""
 import json, sys, unicodedata
 
 def norm(s):
@@ -31,7 +29,7 @@ def main():
         classe = (linha.get("classe") or "").lower()
         if classe == "resgate":
             out.append({**linha, "veredito": "GRAVAR",
-                        "acao": "Lance na conta 30060006 RESGATE. Caixa 4. Data do extrato. Juros 0. Multa 0. Baixe e ligue."})
+                        "acao": "1100. Mais receita. Cliente Bradesco. Histórico do extrato. Valor do extrato. Competência e pagamento = data do extrato. Conta 30060006. Pix ou dinheiro. À vista. Baixa: juros 0, multa 0, caixa 4. Ligue."})
             continue
         if classe in ("aplicacao", "rentabilidade"):
             out.append({**linha, "veredito": "ARIADNA", "acao": "Sem linha. Não crio."})
