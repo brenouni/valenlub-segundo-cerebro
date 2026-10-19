@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
-description: "Conciliação do caixa 4. Anexo sem texto já é o pedido. Lote de boleto é soma, não um título."
-version: "1.29.0"
+description: "Conciliação do caixa 4. Anexo sem texto já é o pedido. Cartão somado desdobra. Lote é soma."
+version: "1.30.0"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -12,7 +12,7 @@ metadata:
 
 # Conciliação — ValenLub, caixa 4
 
-Fonte única. Versão 1.29. Você não decide. O script decide.
+Fonte única. Versão 1.30. Você não decide. O script decide.
 
 ## Gatilho
 
@@ -30,31 +30,38 @@ Sem arquivo, pare. Responda sem ser marcado.
 5. Linha `ARIADNA`: não grave. Vai para o PDF, com o nome.
 6. PDF no fim. Pare em: “Passagem feita.”
 
+## Cartão desdobrado
+
+Ariadna, 19/10. A Cielo junta. O banco separa.
+Duas linhas do banco somam um título: é desdobrar. Não é falta.
+
+1. Ache o título no valor da soma.
+2. Clique em desdobrar.
+3. Informe os dois valores do banco. A soma tem que bater no centavo.
+4. Ligue cada linha no seu pedaço.
+
+Linha de cartão com título no mesmo valor: só ligue.
+Pago no bruto, diferença = taxa: ligue no líquido. Não edite.
+
 ## Lote de boleto
 
-LIQUIDACAO DE COBRANCA não é um título. Ariadna, 19/10.
 Não procure um título no valor da linha.
-
-1. Abra os recebimentos do dia.
-2. Selecione todos.
-3. Desmarque o que for recebimento de cartão.
-4. Some o que ficou. Se bater com a linha do banco, no centavo, ligue.
-5. Não mande o lote para a Ariadna só porque a linha não foi aberta.
+Selecione os recebimentos do dia. Desmarque cartão. Soma bate, ligue.
 
 ## Resgate
 
-Nasce na 1100. Mais receita. Cliente Bradesco. Histórico do extrato.
-Competência e pagamento = data do extrato. Conta 30060006.
-Pix ou dinheiro. À vista. Baixa: juros 0, multa 0, caixa 4. Ligue.
+Nasce na 1100. Cliente Bradesco. Conta 30060006.
+Competência e pagamento = data do extrato.
+Baixa: juros 0, multa 0, caixa 4. Ligue.
 Aplicação e rentabilidade: ARIADNA. Não crie.
 
 ## Demais
 
 Centavo: título único até 0,02 é GRAVAR.
-Cartão pago no bruto: ligue no líquido. Não edite.
 Tarifa: 30060001, caixa 4, data do extrato.
 
 ## Não fazer
 
 Não estorna. Não grava DNI. Não edite título Pago. Não escolha entre vários.
 Não procure um título no valor do lote.
+Não deixe duas linhas de cartão em falta se a soma é um título.
