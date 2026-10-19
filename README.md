@@ -1,3 +1,3 @@
 # valenlub-segundo-cerebro
 
-Conciliação: skill 1.28. Única regra. Resgate nasce na 1100.
+Conciliação: skill 1.29. Única regra. Lote de boleto é soma.
