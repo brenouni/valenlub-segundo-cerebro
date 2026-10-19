@@ -27,9 +27,13 @@ def main():
         v = round(float(linha["valor"]), 2)
         nome = linha.get("nome") or ""
         classe = (linha.get("classe") or "").lower()
+        if classe in ("boleto", "liquidacao"):
+            out.append({**linha, "veredito": "GRAVAR",
+                        "acao": "Lote. Não procure um título neste valor. Selecione os recebimentos do dia. Desmarque cartão. Se a soma bater no centavo, ligue."})
+            continue
         if classe == "resgate":
             out.append({**linha, "veredito": "GRAVAR",
-                        "acao": "1100. Mais receita. Cliente Bradesco. Histórico do extrato. Valor do extrato. Competência e pagamento = data do extrato. Conta 30060006. Pix ou dinheiro. À vista. Baixa: juros 0, multa 0, caixa 4. Ligue."})
+                        "acao": "1100. Mais receita. Cliente Bradesco. Conta 30060006. Juros 0. Multa 0. Caixa 4. Ligue."})
             continue
         if classe in ("aplicacao", "rentabilidade"):
             out.append({**linha, "veredito": "ARIADNA", "acao": "Sem linha. Não crio."})
@@ -37,7 +41,7 @@ def main():
         if classe == "tarifa":
             out.append({**linha, "veredito": "GRAVAR", "acao": "Tarifa 30060001, caixa 4, data do extrato."})
             continue
-        base = rec if classe in ("pix", "cartao", "boleto") else pag
+        base = rec if classe in ("pix", "cartao") else pag
         cand = [t for t in base if abs(round(float(t["valor"]), 2) - v) <= 0.02]
         if len(cand) == 1:
             t = cand[0]
