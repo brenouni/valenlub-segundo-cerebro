@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
-description: "Conciliação do caixa 4. Anexo sem texto já é o pedido. Cartão somado desdobra. Lote é soma."
-version: "1.30.0"
+description: "Conciliação do caixa 4. Anexo sem texto já é o pedido. Tela que fecha não é falta. Tente de novo."
+version: "1.31.0"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -12,7 +12,7 @@ metadata:
 
 # Conciliação — ValenLub, caixa 4
 
-Fonte única. Versão 1.30. Você não decide. O script decide.
+Fonte única. Versão 1.31. Você não decide. O script decide.
 
 ## Gatilho
 
@@ -23,30 +23,44 @@ Sem arquivo, pare. Responda sem ser marcado.
 
 ## Ordem
 
-1. Dois GETs. Salve o JSON. `dt_baixa_fim` = dia seguinte.
-2. Monte o extrato do dia: valor, nome inteiro, classe.
-3. Rode `decidir.py`.
-4. Linha `GRAVAR`: clique e faça. Não reclassifique.
-5. Linha `ARIADNA`: não grave. Vai para o PDF, com o nome.
-6. PDF no fim. Pare em: “Passagem feita.”
+1. Uma aba. Feche as outras do Query antes de começar.
+2. Dois GETs. Salve o JSON. `dt_baixa_fim` = dia seguinte.
+3. Monte o extrato do dia: valor, nome inteiro, classe.
+4. Rode `decidir.py`.
+5. Linha `GRAVAR`: clique e faça. Não reclassifique.
+6. Linha `ARIADNA`: não grave. Vai para o PDF, com o nome.
+7. PDF no fim. Pare em: “Passagem feita.”
+
+## Tela que falha
+
+Não é falta. Não é da Ariadna. Breno, 21/10.
+
+Formulário fechou antes do Concluir. Navegador fechou. Aba não abriu. Várias abas. Painel vazio. Busca não carregou.
+
+1. Feche as abas extras. Deixe uma.
+2. Abra de novo a mesma tela.
+3. Preencha de novo. Conclua.
+4. Confira na tela: a linha ficou Conciliado.
+5. Só então passe para a próxima.
+
+Não escreva “Passagem feita” com linha GRAVAR em aberto.
+Não coloque no PDF como falta o que o formulário não gravou.
+Três tentativas. Na quarta, diga o campo que travou e pare só nessa linha.
 
 ## Cartão desdobrado
 
-Ariadna, 19/10. A Cielo junta. O banco separa.
-Duas linhas do banco somam um título: é desdobrar. Não é falta.
-
-1. Ache o título no valor da soma.
-2. Clique em desdobrar.
-3. Informe os dois valores do banco. A soma tem que bater no centavo.
-4. Ligue cada linha no seu pedaço.
-
-Linha de cartão com título no mesmo valor: só ligue.
+A Cielo junta. O banco separa.
+Duas linhas do banco somam um título: desdobre. Não é falta.
+Informe os dois valores. A soma tem que bater no centavo. Ligue cada pedaço.
+Linha com título no mesmo valor: só ligue.
 Pago no bruto, diferença = taxa: ligue no líquido. Não edite.
 
 ## Lote de boleto
 
 Não procure um título no valor da linha.
-Selecione os recebimentos do dia. Desmarque cartão. Soma bate, ligue.
+Selecione os recebimentos do dia. Desmarque cartão.
+Soma bate no centavo: ligue.
+Soma não bate: não ligue. Diga os dois números. Não chame de falta.
 
 ## Resgate
 
@@ -64,4 +78,4 @@ Tarifa: 30060001, caixa 4, data do extrato.
 
 Não estorna. Não grava DNI. Não edite título Pago. Não escolha entre vários.
 Não procure um título no valor do lote.
-Não deixe duas linhas de cartão em falta se a soma é um título.
+Não entregue o dia com GRAVAR em aberto.
