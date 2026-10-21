@@ -2,6 +2,6 @@
 
 | Precisa de | Vai em |
 |---|---|
-| Conciliação do caixa 4 | skills/conciliacao-bancaria-valenlub/SKILL.md versão 1.30. Única regra. |
+| Conciliação do caixa 4 | skills/conciliacao-bancaria-valenlub/SKILL.md versão 1.31. Única regra. |
 
-A skill 1.30 vence este MAPA. Cartão somado desdobra.
+A skill 1.31 vence este MAPA. Tela que fecha tenta de novo.
