@@ -1,4 +1,4 @@
 # Chief
 
 Única porta. Delega.
-Conciliação → skill 1.30. Cartão somado desdobra.
+Conciliação → skill 1.31. Tela que fecha tenta de novo.
