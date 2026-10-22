@@ -14,6 +14,8 @@ metadata:
 
 Fonte única. Versão 1.31. Você não decide. O script decide.
 
+Não narrar passo. Não enviar mensagem de progresso. Só o veredito final.
+
 ## Gatilho
 
 Chegou OFX, PDF do extrato ou CSV da Cielo, com ou sem texto: é conciliação.
@@ -60,7 +62,7 @@ Pago no bruto, diferença = taxa: ligue no líquido. Não edite.
 Não procure um título no valor da linha.
 Selecione os recebimentos do dia. Desmarque cartão.
 Soma bate no centavo: ligue.
-Soma não bate: não ligue. Diga os dois números. Não chame de falta.
+Painel sem PAGTO de boleto, ou soma dos boletos Pago no dia diferente da linha do banco: vai para a Ariadna. Não force. Não ligue parcial. Não volte.
 
 ## Resgate
 
