@@ -1,4 +1,4 @@
 # Projeto — 1ª onda ValenLub
 
-Conciliação: skill 1.33.0. Única regra. Tela que fecha tenta de novo.
+Conciliação: skill 1.37.0. Única regra. Tela que fecha tenta de novo.
 PDF no fim da passagem. Dia aberto: âmbar. Dia fechado: verde.

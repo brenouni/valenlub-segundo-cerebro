@@ -6,7 +6,7 @@ CONCILIAR_DIA_VALENLUB = {
         "Concilia o caixa 4 da ValenLub no dia informado (skill conciliacao-bancaria-valenlub 1.33.0). "
         "Lê o OFX do dia, faz GET read-only em contas-receber e contas-a-pagar na API Query, "
         "aplica as regras (GRAVAR/ARIADNA), em modo simular não grava, em executar só o que a regra fecha "
-        "(ou stub se a API de escrita não estiver documentada), gera o PDF no visual aprovado e "
+        "grava no Query (aplicacao/tarifa/resgate/liquidacao), gera o PDF no visual aprovado e "
         "retorna status, contagens, criados, ariadna e pdf_path. "
         "Use quando chegar OFX/extrato/CSV Cielo do caixa 4."
     ),

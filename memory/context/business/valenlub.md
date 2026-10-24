@@ -1,4 +1,4 @@
 # ValenLub
 
 Distribuidora GT OIL.
-Conciliação: skill 1.33.0. Este arquivo não decide baixa.
+Conciliação: skill 1.37.0. Este arquivo não decide baixa.

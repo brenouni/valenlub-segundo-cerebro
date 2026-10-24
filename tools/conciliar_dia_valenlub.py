@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conciliação do caixa 4 ValenLub — skill 1.33.0.
+"""Conciliação do caixa 4 ValenLub — skill 1.37.0.
 
 Função principal: conciliar_dia_valenlub(...)
 
@@ -1363,7 +1363,13 @@ def _montar_json_pdf(
         "falta_linhas": falta_linhas,
         "gravado": (
             f"Modo {modo}. GRAVAR {conciliado}. ARIADNA {falta}."
-            + (" Aplicacao via criar.consumo.snf; demais classes stub." if modo == "executar" else "")
+            + (
+                " Escrita: aplicacao/tarifa (criar.consumo.snf), "
+                "resgate/rentabilidade (criar.novo+receber_transaction), "
+                "liquidacao (conciliar)."
+                if modo == "executar"
+                else ""
+            )
         ),
     }
 
@@ -1574,8 +1580,12 @@ def conciliar_dia_valenlub(
                 else f"Passagem feita. ARIADNA {len(ariadna)}."
             )
             + (
-                " AVISO: modo executar é stub — nada foi gravado no Query "
-                "(API de escrita não documentada)."
+                (
+                    f" Executar: {sum(1 for e in executados if e.get('status')=='gravado')}"
+                    f"/{len(executados)} gravado."
+                    if executados
+                    else " Executar: nada a gravar."
+                )
                 if modo == "executar"
                 else ""
             )
