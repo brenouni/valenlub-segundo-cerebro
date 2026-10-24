@@ -1047,9 +1047,9 @@ def _subset_sum_ids(
     itens: list[tuple[str, float]],
     alvo: float,
     *,
-    limite: int = 45,
+    limite: int = 60,
 ) -> list[str] | None:
-    """Subset-sum em centavos; devolve ids cuja soma == alvo."""
+    """Subset-sum em centavos (backtrack podado); devolve ids cuja soma == alvo."""
     T = int(round(abs(float(alvo)) * 100))
     arr: list[tuple[str, int]] = []
     for iid, vr in itens:
@@ -1058,21 +1058,35 @@ def _subset_sum_ids(
             arr.append((str(iid), c))
     arr.sort(key=lambda x: -x[1])
     use = arr[:limite]
-    dp: dict[int, list[int]] = {0: []}
-    for i, (_iid, c) in enumerate(use):
-        add: list[tuple[int, list[int]]] = []
-        for s, path in dp.items():
-            ns = s + c
-            if ns > T or ns in dp:
-                continue
-            add.append((ns, path + [i]))
-        for ns, path in add:
-            dp[ns] = path
-        if T in dp:
-            break
-    if T not in dp:
-        return None
-    return [use[i][0] for i in dp[T]]
+    n = len(use)
+    # prefixos para poda
+    suf = [0] * (n + 1)
+    for i in range(n - 1, -1, -1):
+        suf[i] = suf[i + 1] + use[i][1]
+    found: list[str] | None = None
+
+    def bt(i: int, resto: int, path: list[int]) -> bool:
+        nonlocal found
+        if resto == 0:
+            found = [use[j][0] for j in path]
+            return True
+        if i >= n or resto < 0 or suf[i] < resto:
+            return False
+        # pular itens maiores que o resto
+        while i < n and use[i][1] > resto:
+            i += 1
+        if i >= n:
+            return False
+        # take
+        path.append(i)
+        if bt(i + 1, resto - use[i][1], path):
+            return True
+        path.pop()
+        # skip
+        return bt(i + 1, resto, path)
+
+    bt(0, T, [])
+    return found
 
 
 def query_conciliar_lote(
