@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
 description: "Conciliação do caixa 4. Anexo sem texto já é o pedido. Tela que fecha não é falta. Tente de novo."
-version: "1.31.0"
+version: "1.33.0"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -12,7 +12,7 @@ metadata:
 
 # Conciliação — ValenLub, caixa 4
 
-Fonte única. Versão 1.31. Você não decide. O script decide.
+Fonte única. Versão 1.33.0. Você não decide. O script decide.
 
 Não narrar passo. Não enviar mensagem de progresso. Só o veredito final.
 
@@ -64,17 +64,29 @@ Selecione os recebimentos do dia. Desmarque cartão.
 Soma bate no centavo: ligue.
 Painel sem PAGTO de boleto, ou soma dos boletos Pago no dia diferente da linha do banco: vai para a Ariadna. Não force. Não ligue parcial. Não volte.
 
-## Resgate
+## Resgate — lançar e baixar
 
-Nasce na 1100. Cliente Bradesco. Conta 30060006.
-Competência e pagamento = data do extrato.
-Baixa: juros 0, multa 0, caixa 4. Ligue.
-Aplicação e rentabilidade: ARIADNA. Não crie.
+- Rotina 1100, botão Receita, “Lançar receita avulsa”.
+- Cliente 1117 BANCO BRADESCO S.A., histórico resgate, valor da linha, competência e pagamento na data do extrato, conta 30060006 RESGATE, forma PIX, plano A VISTA - A VISTA PIX, caixa para baixa vazio.
+- Concluir. Título nasce Aberto.
+- Abrir Receber Pagamento. Zerar vrJuros e vrMulta. Caixa Destino = caixa 4. Data de Recebimento = data do extrato. Valor recebido = valor do título. Concluir.
+- Ligar na central do caixa 4.
+- Não criar se já existir título único na 30060006 no mesmo valor e dia. Uma aba só.
+
+## Rentabilidade — lançar e baixar
+
+- Rotina 1100, botão Receita, “Lançar receita avulsa”.
+- Cliente 1117 BANCO BRADESCO S.A., histórico rentabilidade, valor da linha, competência e pagamento na data do extrato, conta 30060006 RESGATE, forma PIX, plano A VISTA - A VISTA PIX, caixa para baixa vazio.
+- Concluir. Título nasce Aberto.
+- Abrir Receber Pagamento. Zerar vrJuros e vrMulta. Caixa Destino = caixa 4. Data de Recebimento = data do extrato. Valor recebido = valor do título. Concluir.
+- Ligar na central do caixa 4.
+- Não criar se já existir título único na 30060006 no mesmo valor e dia. Uma aba só.
 
 ## Demais
 
 Centavo: título único até 0,02 é GRAVAR.
 Tarifa: 30060001, caixa 4, data do extrato.
+Aplicação: ARIADNA. Não crie.
 
 ## Não fazer
 
