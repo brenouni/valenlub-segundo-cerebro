@@ -1,0 +1,24 @@
+name: conciliar-dia-valenlub
+version: 1.0.0
+description: Conciliação do caixa 4 ValenLub (skill 1.33.0) — OFX + Query + PDF
+author: Breno Alencar
+license: Proprietary
+tags: [ValenLub, Conciliacao, Query]
+provides_tools:
+  - conciliar_dia_valenlub
+requires_env:
+  - name: QUERY_TENANT
+    description: Tenant X-Tenant da API Query
+    secret: false
+  - name: QUERY_TOKEN
+    description: Bearer Query (ou use QUERY_USER/QUERY_PASS)
+    secret: true
+python_dependencies:
+  - "reportlab>=4.0,<5"
+  - "requests>=2.28,<3"
+config_schema:
+  brain_root:
+    type: str
+    default: "/home/hermes/valenlub-segundo-cerebro"
+    description: Caminho absoluto do segundo cérebro ValenLub
+    label: Cérebro ValenLub
