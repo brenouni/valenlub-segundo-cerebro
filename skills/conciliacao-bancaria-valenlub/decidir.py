@@ -92,14 +92,14 @@ def decidir(ext, rec, pag):
             )
             continue
         if classe == "rentabilidade":
-            # Skill 1.33.0: lançar + baixar (GRAVAR). Não ARIADNA.
+            # Skill 1.33.0: criar e baixar (GRAVAR). Nunca Pix/ARIADNA.
             out.append(
                 {
                     **linha,
                     "veredito": "GRAVAR",
                     "acao": (
-                        "1100. Lançar receita avulsa. Cliente 1117 Bradesco. "
-                        "Histórico rentabilidade. Conta 30060006. PIX. "
+                        "1100. Criar e baixar receita avulsa. Cliente 1117 Bradesco. "
+                        "Histórico rentabilidade. Conta 30060006. "
                         "Baixar: juros 0 multa 0 caixa 4. Ligue."
                     ),
                 }
@@ -153,6 +153,39 @@ def decidir(ext, rec, pag):
             )
             continue
         if classe == "cartao":
+            # Cielo: se veio líquido/taxa/bruto, usa bruto p/ achar título e liga no líquido
+            cielo_bruto = linha.get("cielo_bruto")
+            cielo_taxa = linha.get("cielo_taxa")
+            cielo_liq = linha.get("cielo_liquido")
+            if cielo_bruto is not None:
+                alvo = round(float(cielo_bruto), 2)
+                tit_bruto = [
+                    t for t in rec if abs(round(float(t["valor"]), 2) - alvo) <= 0.02
+                ]
+                if len(tit_bruto) == 1:
+                    t = tit_bruto[0]
+                    taxa_txt = (
+                        f" Taxa Cielo {float(cielo_taxa):.2f}."
+                        if cielo_taxa is not None
+                        else ""
+                    )
+                    liq_txt = (
+                        f" Líquido {float(cielo_liq):.2f}."
+                        if cielo_liq is not None
+                        else f" Líquido {v:.2f}."
+                    )
+                    out.append(
+                        {
+                            **linha,
+                            "veredito": "GRAVAR",
+                            "id": t.get("id"),
+                            "acao": (
+                                f"Cielo: título {t.get('id')} no bruto {alvo:.2f}."
+                                f"{taxa_txt}{liq_txt} Ligue no líquido. Não edite."
+                            ),
+                        }
+                    )
+                    continue
             bruto = [
                 t
                 for t in rec
@@ -160,12 +193,15 @@ def decidir(ext, rec, pag):
             ]
             if len(bruto) == 1:
                 t = bruto[0]
+                taxa_extra = ""
+                if cielo_taxa is not None:
+                    taxa_extra = f" Taxa Cielo {float(cielo_taxa):.2f}."
                 out.append(
                     {
                         **linha,
                         "veredito": "GRAVAR",
                         "id": t.get("id"),
-                        "acao": "Pago no bruto. Ligue no líquido. Não edite.",
+                        "acao": f"Pago no bruto. Ligue no líquido. Não edite.{taxa_extra}",
                     }
                 )
                 continue

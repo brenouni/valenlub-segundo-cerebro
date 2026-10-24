@@ -135,6 +135,22 @@ def _classify_line(nome: str, memo: str = "", trntype: str = "") -> str:
         .replace("Ú", "U")
         .replace("Ç", "C")
     )
+    # Rentabilidade ANTES de cartão/pix: RENTAB* e INVEST FACILCRED não são Pix.
+    if any(
+        k in blob_n
+        for k in (
+            "RENTAB",  # RENTAB. / RENTABIL / RENTABILIDADE
+            "RENTABILIDADE",
+            "INVEST FACILCRED",
+            "RENDIMENTO",
+            "RENDTO",
+            "JUROS CAPITAL",
+            "REMUNERACAO",
+        )
+    ):
+        return "rentabilidade"
+    if any(k in blob_n for k in ("RESGATE", "RESG.", "RESG ")):
+        return "resgate"
     if any(
         k in blob_n
         for k in (
@@ -155,19 +171,6 @@ def _classify_line(nome: str, memo: str = "", trntype: str = "") -> str:
         )
     ):
         return "cartao"
-    if any(k in blob_n for k in ("RESGATE", "RESGATE", "RESG ")):
-        return "resgate"
-    if any(
-        k in blob_n
-        for k in (
-            "RENTABIL",
-            "RENDIMENTO",
-            "RENDTO",
-            "JUROS CAPITAL",
-            "REMUNERACAO",
-        )
-    ):
-        return "rentabilidade"
     if any(k in blob_n for k in ("APLICACAO", "APLIC ", "APLICAC")):
         return "aplicacao"
     if any(
@@ -259,24 +262,114 @@ def ler_ofx(ofx_path: str, data: str) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Cielo CSV (opcional — contexto; não decide sozinho)
+# Cielo CSV — líquido e taxa entram na decisão de cartão
 # ---------------------------------------------------------------------------
 
+def _cielo_num(raw: str) -> float | None:
+    s = (raw or "").strip()
+    if (not s) or s == "-" or s.upper() in ("NULL", "N/A"):
+        return None
+    if s == (chr(92) + "N") or s == (chr(92) + chr(92) + "N"):
+        return None
+    try:
+        return abs(_parse_ofx_amount(s))
+    except (ValueError, TypeError):
+        return None
+
+
+def _cielo_key_match(headers: list[str], *candidates: str) -> str | None:
+    normed = {h: "".join(c for c in h.lower() if c.isalnum()) for h in headers}
+    for cand in candidates:
+        c = "".join(x for x in cand.lower() if x.isalnum())
+        for h, n in normed.items():
+            if c == n or c in n:
+                return h
+    return None
+
+
 def ler_cielo_csv(path: str | None) -> list[dict[str, Any]]:
+    """Lê CSV Cielo e normaliza bruto / taxa / líquido por linha."""
     if not path:
         return []
     p = Path(path)
     if not p.is_file():
         return []
-    rows: list[dict[str, Any]] = []
+    raw_rows: list[dict[str, Any]] = []
     with p.open(encoding="utf-8-sig", newline="") as f:
         sample = f.read(4096)
         f.seek(0)
         delim = ";" if sample.count(";") >= sample.count(",") else ","
         reader = csv.DictReader(f, delimiter=delim)
         for row in reader:
-            rows.append({k.strip(): (v or "").strip() for k, v in row.items() if k})
-    return rows
+            raw_rows.append({(k or "").strip(): (v or "").strip() for k, v in row.items() if k})
+    if not raw_rows:
+        return []
+    headers = list(raw_rows[0].keys())
+    k_bruto = _cielo_key_match(headers, "Valor bruto", "valorbruto", "bruto")
+    k_taxa = _cielo_key_match(
+        headers, "Valor Taxa/Tarifa", "Valor Taxa", "valortaxatarifa", "taxa", "tarifa"
+    )
+    k_liq = _cielo_key_match(headers, "Valor líquido", "Valor liquido", "valorliquido", "liquido")
+    k_data = _cielo_key_match(headers, "Data de pagamento", "datapagamento", "data")
+    k_status = _cielo_key_match(headers, "Status de pagamento", "status")
+    out: list[dict[str, Any]] = []
+    for row in raw_rows:
+        bruto = _cielo_num(row.get(k_bruto or "", "")) if k_bruto else None
+        taxa = _cielo_num(row.get(k_taxa or "", "")) if k_taxa else None
+        liquido = _cielo_num(row.get(k_liq or "", "")) if k_liq else None
+        if liquido is None and bruto is not None and taxa is not None:
+            liquido = round(bruto - taxa, 2)
+        if liquido is None and bruto is None:
+            continue
+        out.append(
+            {
+                "bruto": bruto,
+                "taxa": taxa if taxa is not None else (
+                    round(bruto - liquido, 2) if bruto is not None and liquido is not None else None
+                ),
+                "liquido": liquido if liquido is not None else bruto,
+                "data_pagamento": row.get(k_data or "", "") if k_data else "",
+                "status": row.get(k_status or "", "") if k_status else "",
+                "raw": row,
+            }
+        )
+    return out
+
+
+def enriquecer_cartao_com_cielo(
+    extrato: list[dict[str, Any]], cielo: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Anexa líquido/taxa Cielo nas linhas de cartão (match por líquido ±0,02)."""
+    if not cielo:
+        return extrato
+    usados: set[int] = set()
+    out: list[dict[str, Any]] = []
+    for ln in extrato:
+        item = dict(ln)
+        if (item.get("classe") or "").lower() != "cartao":
+            out.append(item)
+            continue
+        v = round(float(item.get("valor") or 0), 2)
+        match_i = None
+        for i, c in enumerate(cielo):
+            if i in usados:
+                continue
+            liq = c.get("liquido")
+            if liq is None:
+                continue
+            if abs(round(float(liq), 2) - v) <= 0.02:
+                match_i = i
+                break
+        if match_i is None:
+            out.append(item)
+            continue
+        usados.add(match_i)
+        c = cielo[match_i]
+        item["cielo_liquido"] = c.get("liquido")
+        item["cielo_taxa"] = c.get("taxa")
+        item["cielo_bruto"] = c.get("bruto")
+        out.append(item)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -415,27 +508,57 @@ def query_get_titulos(
         raise
 
 
+def _query_creds_missing() -> list[str]:
+    """Lista o que falta no .env do Hermes. Vazio = ok para GET."""
+    _ensure_env()
+    missing: list[str] = []
+    tenant = os.environ.get("QUERY_TENANT", "").strip()
+    token = os.environ.get("QUERY_TOKEN", "").strip()
+    user = os.environ.get("QUERY_USER", "").strip()
+    password = os.environ.get("QUERY_PASS", "").strip()
+    if not tenant:
+        missing.append("QUERY_TENANT")
+    if token:
+        return missing
+    if user and password:
+        return missing
+    # Sem TOKEN e sem par USER+PASS completo
+    if not user and not password:
+        missing.append("QUERY_TOKEN ou (QUERY_USER + QUERY_PASS)")
+    else:
+        if not user:
+            missing.append("QUERY_USER")
+        if not password:
+            missing.append("QUERY_PASS")
+    return missing
+
+
 def carregar_query(data: str, caixa: int) -> tuple[list[dict], list[dict], list[str]]:
-    """GETs read-only. Retorna (receber, pagar, avisos)."""
+    """GETs read-only. Retorna (receber, pagar, avisos).
+
+    Exige QUERY_TENANT e (QUERY_TOKEN ou QUERY_USER+QUERY_PASS).
+    Não pula GET em silêncio — chame _query_creds_missing() antes.
+    """
     _ensure_env()
     avisos: list[str] = []
+    missing = _query_creds_missing()
+    if missing:
+        raise RuntimeError(
+            "Credenciais Query faltando no .env do Hermes: "
+            + ", ".join(missing)
+            + ". Configure QUERY_TENANT e QUERY_TOKEN (ou QUERY_USER + QUERY_PASS) "
+            "em ~/.hermes/.env. GETs não foram executados — execução interrompida."
+        )
     base = os.environ.get("QUERY_API_BASE", "https://backend.acessoquery.com/api")
     tenant = os.environ.get("QUERY_TENANT", "").strip()
     token = os.environ.get("QUERY_TOKEN", "").strip()
-    if not tenant:
-        avisos.append("QUERY_TENANT ausente — GETs Query pulados.")
-        return [], [], avisos
     if not token:
         user = os.environ.get("QUERY_USER", "").strip()
         password = os.environ.get("QUERY_PASS", "").strip()
-        if not user or not password:
-            avisos.append("QUERY_TOKEN ou QUERY_USER/QUERY_PASS ausentes — GETs Query pulados.")
-            return [], [], avisos
         try:
             token = query_login(base, user, password, tenant)
         except Exception as exc:  # noqa: BLE001
-            avisos.append(f"Login Query falhou: {exc}")
-            return [], [], avisos
+            raise RuntimeError(f"Login Query falhou: {exc}") from exc
     dt_fim = (datetime.strptime(data, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
     receber: list[dict] = []
     pagar: list[dict] = []
@@ -474,11 +597,12 @@ def _executar_gravar(linhas_gravar: list[dict], modo: str) -> tuple[list[dict], 
                 criados.append({**item, "tipo": "receita_avulsa_seria_criada"})
             executados.append(item)
             continue
-        # modo executar: sem endpoints de escrita conhecidos no repo → no-op explícito
+        # modo executar: escrita Query não documentada → stub explícito (NÃO grava)
         item["status"] = "stub_noop"
+        item["gravou"] = False
         item["motivo"] = (
-            "API de escrita Query não documentada no cérebro. "
-            "Ação GRAVAR não enviada. Use a tela Query conforme a skill 1.33.0."
+            "AVISO: modo executar é stub. API de escrita Query não documentada. "
+            "Nada foi gravado no Query. Use a tela conforme a skill 1.33.0."
         )
         if classe in ("resgate", "rentabilidade"):
             criados.append({**item, "tipo": "receita_avulsa_pendente_tela"})
@@ -648,10 +772,43 @@ def conciliar_dia_valenlub(
             mensagem=f"Nenhuma linha OFX no dia {data}.",
         )
 
-    # CSV Cielo opcional (contexto; decisão continua no decidir)
-    _ = ler_cielo_csv(cielo_csv_path)
+    # Credenciais Query obrigatórias — não pular GET
+    missing = _query_creds_missing()
+    if missing:
+        msg = (
+            "Bloqueio: credenciais Query faltando no .env do Hermes: "
+            + ", ".join(missing)
+            + ". Configure QUERY_TENANT e QUERY_TOKEN (ou QUERY_USER + QUERY_PASS) "
+            "em ~/.hermes/.env. GET não foi pulado — execução parou."
+        )
+        return ResultadoConciliacao(
+            status="erro",
+            data=data,
+            caixa=caixa,
+            modo=modo,
+            contagens={"linhas": len(extrato), "gravar": 0, "ariadna": 0},
+            linhas=extrato,
+            erros=[msg],
+            mensagem=msg,
+        )
 
-    receber, pagar, avisos = carregar_query(data, caixa)
+    # CSV Cielo: líquido + taxa alimentam decisão de cartão
+    cielo_rows = ler_cielo_csv(cielo_csv_path)
+    extrato = enriquecer_cartao_com_cielo(extrato, cielo_rows)
+
+    try:
+        receber, pagar, avisos = carregar_query(data, caixa)
+    except RuntimeError as exc:
+        return ResultadoConciliacao(
+            status="erro",
+            data=data,
+            caixa=caixa,
+            modo=modo,
+            contagens={"linhas": len(extrato), "gravar": 0, "ariadna": 0},
+            linhas=extrato,
+            erros=[str(exc)],
+            mensagem=str(exc),
+        )
     erros.extend(avisos)
 
     decisoes = decidir(extrato, receber, pagar)
@@ -707,9 +864,17 @@ def conciliar_dia_valenlub(
         erros=erros,
         executados=executados,
         mensagem=(
-            "Passagem feita."
-            if not ariadna
-            else f"Passagem feita. ARIADNA {len(ariadna)}."
+            (
+                "Passagem feita."
+                if not ariadna
+                else f"Passagem feita. ARIADNA {len(ariadna)}."
+            )
+            + (
+                " AVISO: modo executar é stub — nada foi gravado no Query "
+                "(API de escrita não documentada)."
+                if modo == "executar"
+                else ""
+            )
         ),
     )
 
