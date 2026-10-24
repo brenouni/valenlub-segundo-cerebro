@@ -406,30 +406,27 @@ def _http_json(
 
 
 def query_login(base: str, user: str, password: str, tenant: str) -> str:
-    payload = {"usuario": user, "senha": password, "email": user, "password": password}
-    # tenta formatos comuns
-    for body in (
-        {"usuario": user, "senha": password},
-        {"email": user, "password": password},
-        {"login": user, "senha": password},
-        payload,
-    ):
-        try:
-            r = _http_json(
-                "POST",
-                f"{base.rstrip('/')}/login",
-                headers={"X-Tenant": tenant, "Accept": "application/json"},
-                body=body,
-            )
-            if isinstance(r, dict):
-                for key in ("token", "access_token", "accessToken", "bearer"):
-                    if r.get(key):
-                        return str(r[key])
-                    data = r.get("data") or r.get("result") or {}
-                    if isinstance(data, dict) and data.get(key):
-                        return str(data[key])
-        except (HTTPError, URLError, json.JSONDecodeError, KeyError, TypeError):
-            continue
+    # API Query espera cdLogin / cdSenha (confirmado 200 em teste isolado).
+    body = {"cdLogin": user, "cdSenha": password}
+    try:
+        r = _http_json(
+            "POST",
+            f"{base.rstrip('/')}/login",
+            headers={"X-Tenant": tenant, "Accept": "application/json"},
+            body=body,
+        )
+        if isinstance(r, dict):
+            for key in ("token", "access_token", "accessToken", "bearer"):
+                if r.get(key):
+                    return str(r[key])
+                data = r.get("data") or r.get("result") or {}
+                if isinstance(data, dict) and data.get(key):
+                    return str(data[key])
+    except (HTTPError, URLError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise RuntimeError(
+            f"Falha no POST /login Query ({type(exc).__name__}). "
+            "Confira QUERY_USER/QUERY_PASS/QUERY_TENANT."
+        ) from exc
     raise RuntimeError("Falha no POST /login Query. Confira QUERY_USER/QUERY_PASS/QUERY_TENANT.")
 
 
