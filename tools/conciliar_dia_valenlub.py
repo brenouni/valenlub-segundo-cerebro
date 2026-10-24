@@ -957,8 +957,253 @@ def _gravar_receita_e_baixa(
     return item, criado
 
 
+
+_CARTAO_RE = re.compile(
+    r"cart[aã]o|cielo|rede|stone|getnet|pagseguro|safrapay|visa|master|amex|elo\b",
+    re.I,
+)
+
+
+def _data_periodo_br(data: str | None) -> str:
+    """YYYY-MM-DD → DD-MM-YYYY (filtro dtPeriodo da conciliação)."""
+    s = (data or "").strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        y, m, d = s.split("-")
+        return f"{d}-{m}-{y}"
+    if re.match(r"^\d{2}/\d{2}/\d{4}$", s):
+        d, m, y = s.split("/")
+        return f"{d}-{m}-{y}"
+    return s.replace("/", "-")
+
+
+def _mgerencia_get_json(opener: Any, path_qs: str) -> Any:
+    url = f"{_mgerencia_base()}/{path_qs.lstrip('/')}"
+    req = Request(
+        url,
+        headers={
+            "User-Agent": "HermesValenLub/1.0",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "X-Requested-With": "XMLHttpRequest",
+        },
+        method="GET",
+    )
+    with opener.open(req, timeout=90) as resp:
+        raw = resp.read().decode("utf-8", "replace")
+    raw = raw.strip()
+    if not raw or raw[0] not in "{[":
+        raise RuntimeError(f"Resposta não-JSON em {path_qs[:80]}: {raw[:120]!r}")
+    return json.loads(raw)
+
+
+def query_extrato_pendente(
+    opener: Any,
+    *,
+    id_caixa: str,
+    data_extrato: str,
+) -> list[dict]:
+    """GET extrato.json — linhas a conciliar do dia (captura 1311)."""
+    peri = _data_periodo_br(data_extrato)
+    path = (
+        f"pure/financeiro/conciliacao/extrato.json&idCaixa={id_caixa}"
+        f"&modo=pendentes&dtPeriodo={peri}%2C{peri}&cursor=&comSugestoes=0"
+    )
+    payload = _mgerencia_get_json(opener, path)
+    txs = payload.get("transacoes") if isinstance(payload, dict) else None
+    return list(txs or [])
+
+
+def query_movimentacoes_para_alvo(
+    opener: Any,
+    *,
+    id_caixa: str,
+    data_extrato: str,
+    valor: float,
+    tp: str = "Credito",
+) -> list[dict]:
+    """GET movimentacoes_abertas.json — candidatos ao lote (captura Buscar)."""
+    peri = _data_periodo_br(data_extrato)
+    # janela larga como a tela (±30d em torno do dia)
+    try:
+        dt = datetime.strptime(data_extrato[:10], "%Y-%m-%d")
+    except ValueError:
+        dt = None
+    if dt is not None:
+        ini = (dt - timedelta(days=30)).strftime("%d-%m-%Y")
+        fim = (dt + timedelta(days=30)).strftime("%d-%m-%Y")
+        peri = f"{ini}%2C{fim}"
+    else:
+        peri = f"{peri}%2C{peri}"
+    vr = f"{abs(float(valor)):.2f}"
+    path = (
+        f"pure/financeiro/conciliacao/movimentacoes_abertas.json&idCaixa={id_caixa}"
+        f"&dtPeriodo={peri}&tp={tp}&vrAlvo={vr}&termo="
+    )
+    payload = _mgerencia_get_json(opener, path)
+    movs = payload.get("movimentacoes") if isinstance(payload, dict) else None
+    return list(movs or [])
+
+
+def _subset_sum_ids(
+    itens: list[tuple[str, float]],
+    alvo: float,
+    *,
+    limite: int = 45,
+) -> list[str] | None:
+    """Subset-sum em centavos; devolve ids cuja soma == alvo."""
+    T = int(round(abs(float(alvo)) * 100))
+    arr: list[tuple[str, int]] = []
+    for iid, vr in itens:
+        c = int(round(abs(float(vr)) * 100))
+        if 0 < c <= T:
+            arr.append((str(iid), c))
+    arr.sort(key=lambda x: -x[1])
+    use = arr[:limite]
+    dp: dict[int, list[int]] = {0: []}
+    for i, (_iid, c) in enumerate(use):
+        add: list[tuple[int, list[int]]] = []
+        for s, path in dp.items():
+            ns = s + c
+            if ns > T or ns in dp:
+                continue
+            add.append((ns, path + [i]))
+        for ns, path in add:
+            dp[ns] = path
+        if T in dp:
+            break
+    if T not in dp:
+        return None
+    return [use[i][0] for i in dp[T]]
+
+
+def query_conciliar_lote(
+    opener: Any,
+    *,
+    id_extrato: str,
+    ids_movimentacao: list[str],
+) -> str:
+    """POST actions&id=conciliar — ligar extrato ↔ movimentações (captura 1311)."""
+    fields = {
+        "Financeiro_Caixas_Extratos_id": str(id_extrato),
+        "idsMovimentacao": ",".join(str(i) for i in ids_movimentacao),
+    }
+    url = (
+        f"{_mgerencia_base()}"
+        "/scripts/financeiro/conciliacao/actions&id=conciliar"
+    )
+    return _post_urlencoded(opener, url, fields)
+
+
+def _eh_cartao_mov(m: dict) -> bool:
+    blob = " ".join(
+        str(m.get(k) or "")
+        for k in ("hist", "dsHistorico", "pessoa", "nmPessoa", "origem")
+    )
+    return bool(_CARTAO_RE.search(blob))
+
+
+def _gravar_liquidacao(opener: Any, item: dict, ln: dict) -> dict:
+    """Lote de boleto: achar linha OFX + movimentações do dia (sem cartão) e conciliar."""
+    data_ex = _data_linha(ln)
+    valor = abs(float(ln.get("valor") or 0))
+    nome = (ln.get("nome") or ln.get("memo") or "").upper()
+    txs = query_extrato_pendente(opener, id_caixa=_ID_CAIXA, data_extrato=data_ex)
+    # casa por valor ±0,02 e histórico LIQUID* se houver
+    cand = []
+    for t in txs:
+        try:
+            vr = abs(float(t.get("vr") or t.get("valor") or 0))
+        except (TypeError, ValueError):
+            continue
+        if abs(vr - valor) > 0.02:
+            continue
+        hist = str(t.get("hist") or t.get("dsHistorico") or "").upper()
+        if "LIQUID" in nome or "LIQUID" in hist or "BOLETO" in nome:
+            cand.append(t)
+        elif not cand:
+            cand.append(t)
+    # prefer LIQUID in hist
+    liq = [t for t in cand if "LIQUID" in str(t.get("hist") or "").upper()]
+    tx = (liq or cand or [None])[0]
+    if not tx:
+        item["status"] = "erro"
+        item["gravou"] = False
+        item["motivo"] = (
+            f"Extrato pendente não encontrado (caixa {_ID_CAIXA}, "
+            f"data {data_ex}, valor {valor:.2f})."
+        )
+        return item
+    id_extrato = str(tx.get("id") or tx.get("Financeiro_Caixas_Extratos_id") or "")
+    if not id_extrato:
+        item["status"] = "erro"
+        item["gravou"] = False
+        item["motivo"] = "Linha de extrato sem id."
+        return item
+
+    movs = query_movimentacoes_para_alvo(
+        opener, id_caixa=_ID_CAIXA, data_extrato=data_ex, valor=valor, tp="Credito"
+    )
+    # skill: recebimentos do dia; desmarque cartão
+    dia_br = _data_br(data_ex)  # DD/MM/YYYY
+    filtrados: list[tuple[str, float]] = []
+    for m in movs:
+        if _eh_cartao_mov(m):
+            continue
+        mid = m.get("idMovimentacao") or m.get("id")
+        if mid is None:
+            continue
+        try:
+            vr = abs(float(m.get("vr") or m.get("valor") or 0))
+        except (TypeError, ValueError):
+            continue
+        if vr <= 0:
+            continue
+        dt = str(m.get("data") or m.get("dt") or "")
+        # prefer same calendar day; if none match later, fall back
+        filtrados.append((str(mid), vr, dt))
+
+    mesmo_dia = [
+        (i, v) for (i, v, dt) in filtrados if dia_br in dt or dt.replace("-", "/") == dia_br
+        or dt[0:10] == data_ex[:10]
+    ]
+    pool = mesmo_dia or [(i, v) for (i, v, _dt) in filtrados]
+    ids = _subset_sum_ids(pool, valor)
+    if not ids:
+        item["status"] = "erro"
+        item["gravou"] = False
+        item["motivo"] = (
+            f"Lote sem combinação que feche {valor:.2f} "
+            f"(movs={len(pool)}, extrato={id_extrato})."
+        )
+        item["id_extrato"] = id_extrato
+        return item
+
+    resp = query_conciliar_lote(
+        opener, id_extrato=id_extrato, ids_movimentacao=ids
+    )
+    ok = False
+    try:
+        js = json.loads(resp)
+        ok = bool(js.get("isOk")) or "sucesso" in str(js.get("message") or "").lower()
+        item["resposta"] = json.dumps(js, ensure_ascii=False)[:300]
+        item["vinculadas"] = js.get("vinculadas")
+    except json.JSONDecodeError:
+        ok = "[Sucesso]" in resp or "sucesso" in resp.lower()
+        item["resposta"] = (resp or "")[:300]
+    item["status"] = "gravado" if ok else "erro"
+    item["gravou"] = ok
+    item["endpoint"] = (
+        "/mgerencia/scripts/financeiro/conciliacao/actions&id=conciliar"
+    )
+    item["id_extrato"] = id_extrato
+    item["ids_movimentacao"] = ids
+    if not ok:
+        item["motivo"] = "Conciliação sem isOk."
+    return item
+
+
+
 def _executar_gravar(linhas_gravar: list[dict], modo: str) -> tuple[list[dict], list[dict]]:
-    """Em simular: não escreve. Em executar: aplicação/tarifa/receita; liquidação stub."""
+    """Em simular: não escreve. Em executar: aplicação/tarifa/receita/liquidação."""
     criados: list[dict] = []
     executados: list[dict] = []
     opener = None
@@ -981,11 +1226,13 @@ def _executar_gravar(linhas_gravar: list[dict], modo: str) -> tuple[list[dict], 
                 item["tipo"] = "despesa_aplicacao_seria_criada"
             if classe == "tarifa":
                 item["tipo"] = "despesa_tarifa_seria_criada"
+            if classe == "liquidacao":
+                item["tipo"] = "lote_boleto_seria_conciliado"
             executados.append(item)
             continue
 
         try:
-            if classe in ("aplicacao", "tarifa", "resgate", "rentabilidade"):
+            if classe in ("aplicacao", "tarifa", "resgate", "rentabilidade", "liquidacao"):
                 if opener is None:
                     opener = mgerencia_session()
 
@@ -1021,6 +1268,11 @@ def _executar_gravar(linhas_gravar: list[dict], modo: str) -> tuple[list[dict], 
                 executados.append(item)
                 continue
 
+            if classe == "liquidacao":
+                item = _gravar_liquidacao(opener, item, ln)
+                executados.append(item)
+                continue
+
         except Exception as exc:  # noqa: BLE001
             item["status"] = "erro"
             item["gravou"] = False
@@ -1028,13 +1280,13 @@ def _executar_gravar(linhas_gravar: list[dict], modo: str) -> tuple[list[dict], 
             executados.append(item)
             continue
 
-        # liquidação / demais: stub (endpoint de ligar lote ainda não capturado)
+        # demais classes sem captura
         item["status"] = "stub_noop"
         item["gravou"] = False
         item["motivo"] = (
             "AVISO: modo executar — escrita implementada para aplicacao, "
-            "tarifa, rentabilidade e resgate. "
-            f"Classe '{classe}': use a tela (ligar lote sem captura)."
+            "tarifa, rentabilidade, resgate e liquidacao. "
+            f"Classe '{classe}': use a tela."
         )
         executados.append(item)
     return criados, executados
