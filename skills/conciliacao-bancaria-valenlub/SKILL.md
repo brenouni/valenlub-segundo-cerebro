@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
 description: "Conciliação do caixa 4. Anexo sem texto já é o pedido. Tela que fecha não é falta. Tente de novo."
-version: "1.33.0"
+version: "1.34.0"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -12,7 +12,7 @@ metadata:
 
 # Conciliação — ValenLub, caixa 4
 
-Fonte única. Versão 1.33.0. Você não decide. O script decide.
+Fonte única. Versão 1.34.0. Você não decide. O script decide.
 
 Não narrar passo. Não enviar mensagem de progresso. Só o veredito final.
 
@@ -82,6 +82,16 @@ Painel sem PAGTO de boleto, ou soma dos boletos Pago no dia diferente da linha d
 - Ligar na central do caixa 4.
 - Não criar se já existir título único na 30060006 no mesmo valor e dia. Uma aba só.
 
+## Aplicação — lançar e baixar (contas a pagar)
+
+- Rotina 1200 (contas a pagar), Mais despesa.
+- Fornecedor: Bradesco. Descrição: aplicação. Valor: o do extrato.
+- Data de vencimento e competência: data do extrato.
+- Plano de contas: aplicação (30060005). Rateio: não preenche.
+- Marca pagamento. Caixa: 4. Data de pagamento: data do extrato.
+- Ligar na central do caixa 4.
+- Não criar se já existir título único na 30060005 no mesmo valor e dia. Uma aba só.
+- Nunca ARIADNA. Nunca classifique como `outros` nem Pix.
 
 ## Classificação do extrato
 
@@ -90,16 +100,14 @@ Histórico (nome/memo) decide a classe. Ordem importa.
 - `RENTAB` / `RENTABILIDADE` / `INVEST FACILCRED` / `RENDIMENTO` → **rentabilidade** (GRAVAR 1100)
 - `RESGATE` / `RESG.` → **resgate** (GRAVAR 1100)
 - `CIELO` / cartão → **cartao**
-- `APLIC.INVEST FACIL` / `APLICACAO` / `APLIC.` / `APLIC ` → **aplicacao** (nunca `outros`)
+- `APLIC.INVEST FACIL` / `APLICACAO` / `APLIC.` / `APLIC ` → **aplicacao** (GRAVAR 1200)
 - Tarifa / boleto / liquidação / PIX → classes próprias
-
-Aplicação (`APLIC.*`) é **ARIADNA**. Não crie título. Não trate como Pix nem como outros.
 
 ## Demais
 
 Centavo: título único até 0,02 é GRAVAR.
 Tarifa: 30060001, caixa 4, data do extrato.
-Aplicação (`APLIC.INVEST FACIL` / `APLICACAO` / `APLIC.`): ARIADNA. Não crie. Nunca classifique como `outros` nem Pix.
+Aplicação (`APLIC.INVEST FACIL` / `APLICACAO` / `APLIC.`): GRAVAR 1200 (ver seção). Nunca classifique como `outros` nem Pix.
 
 ## Não fazer
 
