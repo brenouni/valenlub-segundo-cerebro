@@ -6,9 +6,11 @@ Função principal: conciliar_dia_valenlub(...)
 Variáveis de ambiente (nunca hardcode):
   QUERY_API_BASE   (default https://backend.acessoquery.com/api)
   QUERY_TOKEN      Bearer já obtido (opcional se USER/PASS)
-  QUERY_TENANT     X-Tenant obrigatório
-  QUERY_USER / QUERY_PASS  para POST /login quando sem TOKEN
+  QUERY_TENANT     token do tenant (path login mgerencia + X-Tenant API)
+  QUERY_USER / QUERY_PASS  login API e mgerencia
   QUERY_CAIXA      id do caixa (default = arg caixa)
+  QUERY_MGERENCIA_BASE  (default https://acessoquery.com/mgerencia)
+  QUERY_MGERENCIA_HOST  (default valenlub.com.br) — host no path /login/{host}/{tenant}
 
 Também lê .env na raiz do cérebro e em ~/.hermes/.env se existirem
 (sem sobrescrever o ambiente já setado).
@@ -31,7 +33,8 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import Request, urlopen, build_opener, HTTPCookieProcessor
+from http.cookiejar import CookieJar
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_DIR = ROOT / "skills" / "conciliacao-bancaria-valenlub"
@@ -590,13 +593,136 @@ def carregar_query(data: str, caixa: int) -> tuple[list[dict], list[dict], list[
 
 
 # ---------------------------------------------------------------------------
-# Execução (stubs seguros — sem inventar API destrutiva)
+# Execução — aplicação via mgerencia (captura 1200 / criar.consumo.snf)
 # ---------------------------------------------------------------------------
 
+# Campos fixos da captura (tela 1200 Despesa + baixa caixa 4). Não inventar.
+_APLICACAO_ID_PESSOA = "1117"
+_APLICACAO_DS_HISTORICO = "aplicacao"
+_APLICACAO_TIPO_ID = "1"  # DINHEIRO
+_APLICACAO_ID_FILIAL = "1"
+_APLICACAO_ID_PLANO = "30060005"
+_APLICACAO_ID_CAIXA = "4"
+_APLICACAO_ID_ASSISTENTE = "2"
+
+
+def _data_br(data: str | None) -> str:
+    """YYYY-MM-DD → DD/MM/YYYY (formato da tela)."""
+    s = (data or "").strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        y, m, d = s.split("-")
+        return f"{d}/{m}/{y}"
+    return s
+
+
+def _mgerencia_base() -> str:
+    return os.environ.get(
+        "QUERY_MGERENCIA_BASE", "https://acessoquery.com/mgerencia"
+    ).rstrip("/")
+
+
+def _mgerencia_host() -> str:
+    return os.environ.get("QUERY_MGERENCIA_HOST", "valenlub.com.br").strip()
+
+
+def mgerencia_session() -> Any:
+    """Sessão cookie PHPSESSID após login mgerencia (cdLogin/cdSenha)."""
+    _ensure_env()
+    tenant = os.environ.get("QUERY_TENANT", "").strip()
+    user = os.environ.get("QUERY_USER", "").strip()
+    password = os.environ.get("QUERY_PASS", "").strip()
+    if not tenant or not user or not password:
+        raise RuntimeError(
+            "Login mgerencia exige QUERY_TENANT, QUERY_USER e QUERY_PASS."
+        )
+    base = _mgerencia_base()
+    host = _mgerencia_host()
+    login_page = f"{base}/login/{host}/{tenant}"
+    logon_url = f"{base}/usercontrol/logon/{host}/{tenant}&novo=1"
+    jar = CookieJar()
+    opener = build_opener(HTTPCookieProcessor(jar))
+    opener.open(Request(login_page, headers={"User-Agent": "HermesValenLub/1.0"}), timeout=60).read()
+    body = urlencode({"cdLogin": user, "cdSenha": password}).encode("utf-8")
+    req = Request(
+        logon_url,
+        data=body,
+        headers={
+            "User-Agent": "HermesValenLub/1.0",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": login_page,
+        },
+        method="POST",
+    )
+    with opener.open(req, timeout=60) as resp:
+        resp.read()
+        final = resp.geturl()
+    if "login" in final.lower() and "usercontrol/logon" not in final.lower():
+        # ainda na tela de login = falhou
+        raise RuntimeError(f"Login mgerencia falhou (url={final}).")
+    return opener
+
+
+def _multipart_body(fields: dict[str, str]) -> tuple[bytes, str]:
+    boundary = f"----HermesBoundary{os.urandom(8).hex()}"
+    lines: list[bytes] = []
+    for name, value in fields.items():
+        lines.append(f"--{boundary}".encode())
+        lines.append(
+            f'Content-Disposition: form-data; name="{name}"'.encode()
+        )
+        lines.append(b"")
+        lines.append(str(value).encode("utf-8"))
+    lines.append(f"--{boundary}--".encode())
+    lines.append(b"")
+    return b"\r\n".join(lines), boundary
+
+
+def query_criar_consumo_aplicacao(
+    opener: Any,
+    *,
+    valor: float,
+    data_extrato: str,
+) -> str:
+    """POST multipart criar.consumo.snf — despesa aplicação + baixa caixa 4.
+
+    Só os campos capturados na tela. Retorna corpo da resposta.
+    """
+    data_br = _data_br(data_extrato)
+    vr = f"{abs(float(valor)):.2f}"
+    fields = {
+        "fields[Financeiro_Cobrancas_Pagar][idPessoa]": _APLICACAO_ID_PESSOA,
+        "fields[Financeiro_Cobrancas_Pagar][dsHistorico]": _APLICACAO_DS_HISTORICO,
+        "fields[Financeiro_Cobrancas_Pagar][vrCobrancaPagar]": vr,
+        "fields[Financeiro_Cobrancas_Pagar][dtVencimentoCobrancaPagar]": data_br,
+        "fields[Financeiro_Cobrancas_Pagar][dtCompetencia]": data_br,
+        "fields[Financeiro_Cobrancas_Pagar][Financeiro_Cobrancas_Pagar_Tipos_id]": _APLICACAO_TIPO_ID,
+        "fields[Financeiro_Cobrancas_Pagar][idFilial]": _APLICACAO_ID_FILIAL,
+        "fields[Financeiro_Cobrancas_Pagar][idPlanoDeContasSubconta]": _APLICACAO_ID_PLANO,
+        "fields[Financeiro_Cobrancas_Pagar][idCaixaBaixa]": _APLICACAO_ID_CAIXA,
+        "fields[Financeiro_Cobrancas_Pagar][dtCobrancaPagarBaixa]": data_br,
+        "fields[Financeiro_Cobrancas_Pagar][idAssistente]": _APLICACAO_ID_ASSISTENTE,
+    }
+    raw, boundary = _multipart_body(fields)
+    url = f"{_mgerencia_base()}/scripts/fiscal/compras/actions/criar.consumo.snf"
+    req = Request(
+        url,
+        data=raw,
+        headers={
+            "User-Agent": "HermesValenLub/1.0",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Accept": "*/*",
+        },
+        method="POST",
+    )
+    with opener.open(req, timeout=90) as resp:
+        return resp.read().decode("utf-8", "replace")
+
+
 def _executar_gravar(linhas_gravar: list[dict], modo: str) -> tuple[list[dict], list[dict]]:
-    """Em simular: não escreve. Em executar: stub documentado (no-op)."""
+    """Em simular: não escreve. Em executar: POST aplicação; demais classes stub."""
     criados: list[dict] = []
     executados: list[dict] = []
+    opener = None
     for ln in linhas_gravar:
         classe = (ln.get("classe") or "").lower()
         item = {
@@ -606,19 +732,54 @@ def _executar_gravar(linhas_gravar: list[dict], modo: str) -> tuple[list[dict], 
             "id": ln.get("id"),
             "acao": ln.get("acao"),
             "veredito": ln.get("veredito"),
+            "data": ln.get("data"),
         }
         if modo == "simular":
             item["status"] = "simulado"
             if classe in ("resgate", "rentabilidade"):
                 criados.append({**item, "tipo": "receita_avulsa_seria_criada"})
+            if classe == "aplicacao":
+                item["tipo"] = "despesa_aplicacao_seria_criada"
             executados.append(item)
             continue
-        # modo executar: escrita Query não documentada → stub explícito (NÃO grava)
+
+        if classe == "aplicacao":
+            try:
+                if opener is None:
+                    opener = mgerencia_session()
+                data_ex = (
+                    ln.get("data")
+                    or ln.get("dt")
+                    or ln.get("data_extrato")
+                    or ""
+                )
+                resp = query_criar_consumo_aplicacao(
+                    opener,
+                    valor=float(ln.get("valor") or 0),
+                    data_extrato=str(data_ex),
+                )
+                ok = "[Sucesso]" in resp
+                item["status"] = "gravado" if ok else "erro"
+                item["gravou"] = ok
+                item["endpoint"] = (
+                    "/mgerencia/scripts/fiscal/compras/actions/criar.consumo.snf"
+                )
+                item["resposta"] = (resp or "")[:300]
+                if not ok:
+                    item["motivo"] = "Resposta sem [Sucesso]."
+            except Exception as exc:  # noqa: BLE001
+                item["status"] = "erro"
+                item["gravou"] = False
+                item["motivo"] = str(exc)
+            executados.append(item)
+            continue
+
+        # demais classes: stub (sem endpoint capturado)
         item["status"] = "stub_noop"
         item["gravou"] = False
         item["motivo"] = (
-            "AVISO: modo executar é stub. API de escrita Query não documentada. "
-            "Nada foi gravado no Query. Use a tela conforme a skill 1.33.0."
+            "AVISO: modo executar — escrita só implementada para aplicacao "
+            "(criar.consumo.snf). Demais classes: use a tela."
         )
         if classe in ("resgate", "rentabilidade"):
             criados.append({**item, "tipo": "receita_avulsa_pendente_tela"})
@@ -675,7 +836,7 @@ def _montar_json_pdf(
         "falta_linhas": falta_linhas,
         "gravado": (
             f"Modo {modo}. GRAVAR {conciliado}. ARIADNA {falta}."
-            + (" Escritas Query em stub (sem endpoint documentado)." if modo == "executar" else "")
+            + (" Aplicacao via criar.consumo.snf; demais classes stub." if modo == "executar" else "")
         ),
     }
 
