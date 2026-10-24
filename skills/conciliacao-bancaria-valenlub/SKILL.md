@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
 description: "Conciliação do caixa 4. Anexo sem texto já é o pedido. Tela que fecha não é falta. Tente de novo."
-version: "1.36.0"
+version: "1.37.0"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -12,7 +12,7 @@ metadata:
 
 # Conciliação — ValenLub, caixa 4
 
-Fonte única. Versão 1.36.0. Você não decide. O script decide.
+Fonte única. Versão 1.37.0. Você não decide. O script decide.
 
 Não narrar passo. Não enviar mensagem de progresso. Só o veredito final.
 

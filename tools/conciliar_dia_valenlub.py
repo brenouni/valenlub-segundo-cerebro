@@ -836,13 +836,16 @@ def query_baixar_receber(
     id_cobranca: str,
     valor: float,
     data_extrato: str,
+    ds_historico: str = "",
 ) -> str:
     """POST receber_transaction — Receber Pagamento (juros/multa 0, caixa 4).
 
-    Campos da captura na tela (Concluir). nmCaixa* é dinâmico; idCaixa=4 basta.
+    Captura Concluir: exige dsHistorico/idHistorico ("Informe um histórico").
+    nmCaixa* é dinâmico; idCaixa=4 basta.
     """
     data_br = _data_br(data_extrato)
     vr = f"{abs(float(valor)):.2f}"
+    hist = (ds_historico or "").strip() or "resgate"
     fields = {
         "fields[postBack][isAssistente]": "",
         "fields[postBack][idAssistente]": _ID_ASSISTENTE_BAIXA,
@@ -860,6 +863,10 @@ def query_baixar_receber(
         "fields[Financeiro_Cobrancas_Receber][dtCobrancaReceberRecebimento]": data_br,
         "fields[Financeiro_Cobrancas_Receber][dsObservacoesBaixa]": "",
         "fields[Financeiro_Cobrancas_Receber][idCobrancaReceber]": str(id_cobranca),
+        "fields[Financeiro_Cobrancas_Receber][idHistorico]": "0",
+        "fields[Financeiro_Cobrancas_Receber][dsHistorico]": hist,
+        "fields[Financeiro_Cobrancas_Receber][idPessoa]": _ID_PESSOA_BRADESCO,
+        "fields[Financeiro_Cobrancas_Receber][idFilial]": _ID_FILIAL,
     }
     url = (
         f"{_mgerencia_base()}"
@@ -943,6 +950,7 @@ def _gravar_receita_e_baixa(
         id_cobranca=id_cob,
         valor=valor,
         data_extrato=data_ex,
+        ds_historico=ds_historico,
     )
     ok = "[Sucesso]" in (resp_baixa or "")
     item["status"] = "gravado" if ok else "erro"
