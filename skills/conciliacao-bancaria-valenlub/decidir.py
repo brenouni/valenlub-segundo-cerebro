@@ -106,6 +106,7 @@ def decidir(ext, rec, pag):
             )
             continue
         if classe == "aplicacao":
+            # APLIC.INVEST FACIL / APLICACAO / APLIC. → aplicacao (nunca outros). ARIADNA.
             out.append({**linha, "veredito": "ARIADNA", "acao": "Aplicação. Sem linha. Não crio."})
             continue
         if classe == "tarifa":

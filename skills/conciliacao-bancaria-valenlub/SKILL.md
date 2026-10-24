@@ -82,11 +82,24 @@ Painel sem PAGTO de boleto, ou soma dos boletos Pago no dia diferente da linha d
 - Ligar na central do caixa 4.
 - Não criar se já existir título único na 30060006 no mesmo valor e dia. Uma aba só.
 
+
+## Classificação do extrato
+
+Histórico (nome/memo) decide a classe. Ordem importa.
+
+- `RENTAB` / `RENTABILIDADE` / `INVEST FACILCRED` / `RENDIMENTO` → **rentabilidade** (GRAVAR 1100)
+- `RESGATE` / `RESG.` → **resgate** (GRAVAR 1100)
+- `CIELO` / cartão → **cartao**
+- `APLIC.INVEST FACIL` / `APLICACAO` / `APLIC.` / `APLIC ` → **aplicacao** (nunca `outros`)
+- Tarifa / boleto / liquidação / PIX → classes próprias
+
+Aplicação (`APLIC.*`) é **ARIADNA**. Não crie título. Não trate como Pix nem como outros.
+
 ## Demais
 
 Centavo: título único até 0,02 é GRAVAR.
 Tarifa: 30060001, caixa 4, data do extrato.
-Aplicação: ARIADNA. Não crie.
+Aplicação (`APLIC.INVEST FACIL` / `APLICACAO` / `APLIC.`): ARIADNA. Não crie. Nunca classifique como `outros` nem Pix.
 
 ## Não fazer
 

@@ -171,7 +171,19 @@ def _classify_line(nome: str, memo: str = "", trntype: str = "") -> str:
         )
     ):
         return "cartao"
-    if any(k in blob_n for k in ("APLICACAO", "APLIC ", "APLICAC")):
+    # Aplicação ANTES de cair em outros: APLIC. / APLIC / APLICACAO / APLIC.INVEST FACIL
+    # (APLIC. com ponto — comum no Bradesco — NÃO é "APLIC " com espaço)
+    if any(
+        k in blob_n
+        for k in (
+            "APLIC.INVEST FACIL",
+            "APLIC.INVEST",
+            "APLICACAO",
+            "APLICAC",
+            "APLIC.",
+            "APLIC ",
+        )
+    ):
         return "aplicacao"
     if any(
         k in blob_n
@@ -295,13 +307,20 @@ def ler_cielo_csv(path: str | None) -> list[dict[str, Any]]:
     if not p.is_file():
         return []
     raw_rows: list[dict[str, Any]] = []
-    with p.open(encoding="utf-8-sig", newline="") as f:
-        sample = f.read(4096)
-        f.seek(0)
-        delim = ";" if sample.count(";") >= sample.count(",") else ","
-        reader = csv.DictReader(f, delimiter=delim)
-        for row in reader:
-            raw_rows.append({(k or "").strip(): (v or "").strip() for k, v in row.items() if k})
+    text = None
+    for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        try:
+            text = p.read_text(encoding=enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        text = p.read_text(encoding="latin-1", errors="replace")
+    sample = text[:4096]
+    delim = ";" if sample.count(";") >= sample.count(",") else ","
+    reader = csv.DictReader(text.splitlines(), delimiter=delim)
+    for row in reader:
+        raw_rows.append({(k or "").strip(): (v or "").strip() for k, v in row.items() if k})
     if not raw_rows:
         return []
     headers = list(raw_rows[0].keys())
