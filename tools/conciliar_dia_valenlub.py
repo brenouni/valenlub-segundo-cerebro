@@ -593,17 +593,32 @@ def carregar_query(data: str, caixa: int) -> tuple[list[dict], list[dict], list[
 
 
 # ---------------------------------------------------------------------------
-# Execução — aplicação via mgerencia (captura 1200 / criar.consumo.snf)
+# Execução — mgerencia (capturas de tela; só campos observados)
 # ---------------------------------------------------------------------------
 
-# Campos fixos da captura (tela 1200 Despesa + baixa caixa 4). Não inventar.
-_APLICACAO_ID_PESSOA = "1117"
+# Comuns (captura 1200 / 1100)
+_ID_PESSOA_BRADESCO = "1117"
+_ID_FILIAL = "1"
+_ID_CAIXA = "4"
+_TIPO_PAGAR_DINHEIRO = "1"  # Financeiro_Cobrancas_Pagar_Tipos_id
+_ID_ASSISTENTE_PAGAR = "2"
+_ID_ASSISTENTE_RECEITA = "3"
+_ID_ASSISTENTE_BAIXA = "2"
+
+# Aplicação — criar.consumo.snf
 _APLICACAO_DS_HISTORICO = "aplicacao"
-_APLICACAO_TIPO_ID = "1"  # DINHEIRO
-_APLICACAO_ID_FILIAL = "1"
 _APLICACAO_ID_PLANO = "30060005"
-_APLICACAO_ID_CAIXA = "4"
-_APLICACAO_ID_ASSISTENTE = "2"
+
+# Tarifa — mesmo endpoint, plano/histórico da captura
+_TARIFA_DS_HISTORICO = "tarifa"
+_TARIFA_ID_PLANO = "30060001"
+
+# Receita (rentabilidade/resgate) — criar.novo + receber_transaction
+_RECEITA_ID_PLANO = "30060006"
+_RECEITA_ID_COBRANCA_TIPO = "115"  # PIX
+_RECEITA_ID_PLANO_PGTO = "73"  # A VISTA PIX
+_RECEITA_ID_MOEDA = "1"
+_RECEITA_CD_MOEDA = "D"
 
 
 def _data_br(data: str | None) -> str:
@@ -657,7 +672,6 @@ def mgerencia_session() -> Any:
         resp.read()
         final = resp.geturl()
     if "login" in final.lower() and "usercontrol/logon" not in final.lower():
-        # ainda na tela de login = falhou
         raise RuntimeError(f"Login mgerencia falhou (url={final}).")
     return opener
 
@@ -677,33 +691,24 @@ def _multipart_body(fields: dict[str, str]) -> tuple[bytes, str]:
     return b"\r\n".join(lines), boundary
 
 
-def query_criar_consumo_aplicacao(
-    opener: Any,
-    *,
-    valor: float,
-    data_extrato: str,
-) -> str:
-    """POST multipart criar.consumo.snf — despesa aplicação + baixa caixa 4.
+def _post_urlencoded(opener: Any, url: str, fields: dict[str, str]) -> str:
+    body = urlencode(fields).encode("utf-8")
+    req = Request(
+        url,
+        data=body,
+        headers={
+            "User-Agent": "HermesValenLub/1.0",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "*/*",
+        },
+        method="POST",
+    )
+    with opener.open(req, timeout=90) as resp:
+        return resp.read().decode("utf-8", "replace")
 
-    Só os campos capturados na tela. Retorna corpo da resposta.
-    """
-    data_br = _data_br(data_extrato)
-    vr = f"{abs(float(valor)):.2f}"
-    fields = {
-        "fields[Financeiro_Cobrancas_Pagar][idPessoa]": _APLICACAO_ID_PESSOA,
-        "fields[Financeiro_Cobrancas_Pagar][dsHistorico]": _APLICACAO_DS_HISTORICO,
-        "fields[Financeiro_Cobrancas_Pagar][vrCobrancaPagar]": vr,
-        "fields[Financeiro_Cobrancas_Pagar][dtVencimentoCobrancaPagar]": data_br,
-        "fields[Financeiro_Cobrancas_Pagar][dtCompetencia]": data_br,
-        "fields[Financeiro_Cobrancas_Pagar][Financeiro_Cobrancas_Pagar_Tipos_id]": _APLICACAO_TIPO_ID,
-        "fields[Financeiro_Cobrancas_Pagar][idFilial]": _APLICACAO_ID_FILIAL,
-        "fields[Financeiro_Cobrancas_Pagar][idPlanoDeContasSubconta]": _APLICACAO_ID_PLANO,
-        "fields[Financeiro_Cobrancas_Pagar][idCaixaBaixa]": _APLICACAO_ID_CAIXA,
-        "fields[Financeiro_Cobrancas_Pagar][dtCobrancaPagarBaixa]": data_br,
-        "fields[Financeiro_Cobrancas_Pagar][idAssistente]": _APLICACAO_ID_ASSISTENTE,
-    }
+
+def _post_multipart(opener: Any, url: str, fields: dict[str, str]) -> str:
     raw, boundary = _multipart_body(fields)
-    url = f"{_mgerencia_base()}/scripts/fiscal/compras/actions/criar.consumo.snf"
     req = Request(
         url,
         data=raw,
@@ -718,8 +723,242 @@ def query_criar_consumo_aplicacao(
         return resp.read().decode("utf-8", "replace")
 
 
+def query_criar_consumo_snf(
+    opener: Any,
+    *,
+    valor: float,
+    data_extrato: str,
+    ds_historico: str,
+    id_plano: str,
+) -> str:
+    """POST multipart criar.consumo.snf — despesa + baixa caixa 4 (captura 1200)."""
+    data_br = _data_br(data_extrato)
+    vr = f"{abs(float(valor)):.2f}"
+    fields = {
+        "fields[Financeiro_Cobrancas_Pagar][idPessoa]": _ID_PESSOA_BRADESCO,
+        "fields[Financeiro_Cobrancas_Pagar][dsHistorico]": ds_historico,
+        "fields[Financeiro_Cobrancas_Pagar][vrCobrancaPagar]": vr,
+        "fields[Financeiro_Cobrancas_Pagar][dtVencimentoCobrancaPagar]": data_br,
+        "fields[Financeiro_Cobrancas_Pagar][dtCompetencia]": data_br,
+        "fields[Financeiro_Cobrancas_Pagar][Financeiro_Cobrancas_Pagar_Tipos_id]": _TIPO_PAGAR_DINHEIRO,
+        "fields[Financeiro_Cobrancas_Pagar][idFilial]": _ID_FILIAL,
+        "fields[Financeiro_Cobrancas_Pagar][idPlanoDeContasSubconta]": id_plano,
+        "fields[Financeiro_Cobrancas_Pagar][idCaixaBaixa]": _ID_CAIXA,
+        "fields[Financeiro_Cobrancas_Pagar][dtCobrancaPagarBaixa]": data_br,
+        "fields[Financeiro_Cobrancas_Pagar][idAssistente]": _ID_ASSISTENTE_PAGAR,
+    }
+    url = f"{_mgerencia_base()}/scripts/fiscal/compras/actions/criar.consumo.snf"
+    return _post_multipart(opener, url, fields)
+
+
+def query_criar_consumo_aplicacao(
+    opener: Any,
+    *,
+    valor: float,
+    data_extrato: str,
+) -> str:
+    """Compat: aplicação (plano 30060005)."""
+    return query_criar_consumo_snf(
+        opener,
+        valor=valor,
+        data_extrato=data_extrato,
+        ds_historico=_APLICACAO_DS_HISTORICO,
+        id_plano=_APLICACAO_ID_PLANO,
+    )
+
+
+def query_criar_consumo_tarifa(
+    opener: Any,
+    *,
+    valor: float,
+    data_extrato: str,
+) -> str:
+    """Tarifa — mesma tela 1200, plano 30060001 / hist tarifa (captura)."""
+    return query_criar_consumo_snf(
+        opener,
+        valor=valor,
+        data_extrato=data_extrato,
+        ds_historico=_TARIFA_DS_HISTORICO,
+        id_plano=_TARIFA_ID_PLANO,
+    )
+
+
+def query_criar_receita_avulsa(
+    opener: Any,
+    *,
+    valor: float,
+    data_extrato: str,
+    ds_historico: str,
+) -> str:
+    """POST urlencoded criar.novo — receita 1100 (caixa baixa vazio). Captura tela."""
+    data_br = _data_br(data_extrato)
+    vr = f"{abs(float(valor)):.2f}"
+    fields = {
+        "fields[postBack][isAssistente]": "true",
+        "fields[postBack][idAssistente]": _ID_ASSISTENTE_RECEITA,
+        "fields[Financeiro_Cobrancas_Receber][idFilial]": _ID_FILIAL,
+        "fields[Financeiro_Cobrancas_Receber][idPessoa]": _ID_PESSOA_BRADESCO,
+        "fields[Financeiro_Cobrancas_Receber][dsHistorico]": ds_historico,
+        "fields[Financeiro_Cobrancas_Receber][vrCobrancaReceber]": vr,
+        "fields[Financeiro_Cobrancas_Receber][dtCompetencia]": data_br,
+        "fields[Financeiro_Cobrancas_Receber][dtPagamento]": data_br,
+        "fields[Financeiro_Cobrancas_Receber][idCaixaBaixa]": "",
+        "fields[Financeiro_Cobrancas_Receber][idPlanoDeContasSubconta]": _RECEITA_ID_PLANO,
+        "fields[Financeiro_Cobrancas_Receber][idCobrancaTipo]": _RECEITA_ID_COBRANCA_TIPO,
+        "fields[Financeiro_Cobrancas_Receber][Financeiro_PlanosDePagamentos_id]": _RECEITA_ID_PLANO_PGTO,
+        "fields[Financeiro_Cobrancas_Receber][con]": "financeiro",
+        "fields[Financeiro_Cobrancas_Receber][view]": "cobrancas_receber",
+        "fields[Financeiro_Cobrancas_Receber][act]": "criar.novo",
+        "fields[Financeiro_Cobrancas_Receber][semRedirecionamento]": "1",
+        "fields[Financeiro_Cobrancas_Receber][idAssistente]": _ID_ASSISTENTE_RECEITA,
+        "fields[Financeiro_Cobrancas_Receber][isAssistente]": "true",
+        "fields[Financeiro_Cobrancas_Receber][forceLog]": "1",
+        "fields[Financeiro_Cobrancas_Receber][vrDesconto]": "0",
+        "fields[Financeiro_Cobrancas_Receber][idMoeda]": _RECEITA_ID_MOEDA,
+        "fields[Financeiro_Cobrancas_Receber][vrPcntDesconto]": "0",
+    }
+    url = f"{_mgerencia_base()}/scripts/financeiro/cobrancas_receber/actions/criar.novo"
+    return _post_urlencoded(opener, url, fields)
+
+
+def _parse_id_cobranca_sucesso(resp: str) -> str | None:
+    """Extrai cód Nº NNNN da resposta [Sucesso] criar.novo."""
+    m = re.search(r"c[oó]d\s*N[ºo°]?\s*(\d+)", resp or "", re.I)
+    if m:
+        return m.group(1)
+    m = re.search(r"N[ºo°]\s*(\d+)", resp or "", re.I)
+    return m.group(1) if m else None
+
+
+def query_baixar_receber(
+    opener: Any,
+    *,
+    id_cobranca: str,
+    valor: float,
+    data_extrato: str,
+) -> str:
+    """POST receber_transaction — Receber Pagamento (juros/multa 0, caixa 4).
+
+    Campos da captura na tela (Concluir). nmCaixa* é dinâmico; idCaixa=4 basta.
+    """
+    data_br = _data_br(data_extrato)
+    vr = f"{abs(float(valor)):.2f}"
+    fields = {
+        "fields[postBack][isAssistente]": "",
+        "fields[postBack][idAssistente]": _ID_ASSISTENTE_BAIXA,
+        "fields[Financeiro_Cobrancas_Receber][vrTotal]": vr,
+        "fields[Financeiro_Cobrancas_Receber][vrJuros]": "0",
+        "fields[Financeiro_Cobrancas_Receber][vrMulta]": "0",
+        "fields[Financeiro_Cobrancas_Receber][vrDesconto]": "0",
+        "fields[Financeiro_Cobrancas_Receber][vrAcrescimo]": "0",
+        "fields[Financeiro_CreditosDeClientes][Financeiro_CreditosDeClientes_valor]": "",
+        "fields[Financeiro_Cobrancas_Receber][vrTaxas]": "0.00",
+        "fields[Financeiro_Cobrancas_Receber][vrCobrancaReceber]": vr,
+        "fields[Financeiro_Cobrancas_Receber][idCaixa]": _ID_CAIXA,
+        "fields[Financeiro_Cobrancas_Receber][idMoeda]": _RECEITA_ID_MOEDA,
+        "fields[Financeiro_Cobrancas_Receber][cdMoeda]": _RECEITA_CD_MOEDA,
+        "fields[Financeiro_Cobrancas_Receber][dtCobrancaReceberRecebimento]": data_br,
+        "fields[Financeiro_Cobrancas_Receber][dsObservacoesBaixa]": "",
+        "fields[Financeiro_Cobrancas_Receber][idCobrancaReceber]": str(id_cobranca),
+    }
+    url = (
+        f"{_mgerencia_base()}"
+        "/scripts/financeiro/cobrancas_receber/actions/receber_transaction"
+    )
+    return _post_urlencoded(opener, url, fields)
+
+
+def _data_linha(ln: dict) -> str:
+    return str(
+        ln.get("data") or ln.get("dt") or ln.get("data_extrato") or ""
+    )
+
+
+def _gravar_despesa_snf(
+    opener: Any,
+    item: dict,
+    ln: dict,
+    *,
+    ds_historico: str,
+    id_plano: str,
+) -> dict:
+    resp = query_criar_consumo_snf(
+        opener,
+        valor=float(ln.get("valor") or 0),
+        data_extrato=_data_linha(ln),
+        ds_historico=ds_historico,
+        id_plano=id_plano,
+    )
+    ok = "[Sucesso]" in resp
+    item["status"] = "gravado" if ok else "erro"
+    item["gravou"] = ok
+    item["endpoint"] = (
+        "/mgerencia/scripts/fiscal/compras/actions/criar.consumo.snf"
+    )
+    item["plano"] = id_plano
+    item["historico"] = ds_historico
+    item["resposta"] = (resp or "")[:300]
+    if not ok:
+        item["motivo"] = "Resposta sem [Sucesso]."
+    return item
+
+
+def _gravar_receita_e_baixa(
+    opener: Any,
+    item: dict,
+    ln: dict,
+    *,
+    ds_historico: str,
+) -> tuple[dict, dict | None]:
+    """criar.novo → parse id → receber_transaction. Retorna (item, criado?)."""
+    valor = float(ln.get("valor") or 0)
+    data_ex = _data_linha(ln)
+    resp_cria = query_criar_receita_avulsa(
+        opener,
+        valor=valor,
+        data_extrato=data_ex,
+        ds_historico=ds_historico,
+    )
+    id_cob = _parse_id_cobranca_sucesso(resp_cria)
+    criado = {
+        **item,
+        "tipo": "receita_avulsa",
+        "historico": ds_historico,
+        "id_cobranca": id_cob,
+        "resposta_criar": (resp_cria or "")[:300],
+    }
+    if "[Sucesso]" not in (resp_cria or "") or not id_cob:
+        item["status"] = "erro"
+        item["gravou"] = False
+        item["endpoint"] = (
+            "/mgerencia/scripts/financeiro/cobrancas_receber/actions/criar.novo"
+        )
+        item["resposta"] = (resp_cria or "")[:300]
+        item["motivo"] = "criar.novo sem [Sucesso] ou sem cód."
+        criado["status"] = "erro"
+        return item, criado
+
+    resp_baixa = query_baixar_receber(
+        opener,
+        id_cobranca=id_cob,
+        valor=valor,
+        data_extrato=data_ex,
+    )
+    ok = "[Sucesso]" in (resp_baixa or "")
+    item["status"] = "gravado" if ok else "erro"
+    item["gravou"] = ok
+    item["id_cobranca"] = id_cob
+    item["endpoint"] = "criar.novo + receber_transaction"
+    item["resposta"] = (resp_baixa or "")[:300]
+    if not ok:
+        item["motivo"] = "Baixa sem [Sucesso] (título pode ter nascido Aberto)."
+    criado["status"] = "criado"
+    criado["baixado"] = ok
+    return item, criado
+
+
 def _executar_gravar(linhas_gravar: list[dict], modo: str) -> tuple[list[dict], list[dict]]:
-    """Em simular: não escreve. Em executar: POST aplicação; demais classes stub."""
+    """Em simular: não escreve. Em executar: aplicação/tarifa/receita; liquidação stub."""
     criados: list[dict] = []
     executados: list[dict] = []
     opener = None
@@ -740,49 +979,63 @@ def _executar_gravar(linhas_gravar: list[dict], modo: str) -> tuple[list[dict], 
                 criados.append({**item, "tipo": "receita_avulsa_seria_criada"})
             if classe == "aplicacao":
                 item["tipo"] = "despesa_aplicacao_seria_criada"
+            if classe == "tarifa":
+                item["tipo"] = "despesa_tarifa_seria_criada"
             executados.append(item)
             continue
 
-        if classe == "aplicacao":
-            try:
+        try:
+            if classe in ("aplicacao", "tarifa", "resgate", "rentabilidade"):
                 if opener is None:
                     opener = mgerencia_session()
-                data_ex = (
-                    ln.get("data")
-                    or ln.get("dt")
-                    or ln.get("data_extrato")
-                    or ""
-                )
-                resp = query_criar_consumo_aplicacao(
+
+            if classe == "aplicacao":
+                item = _gravar_despesa_snf(
                     opener,
-                    valor=float(ln.get("valor") or 0),
-                    data_extrato=str(data_ex),
+                    item,
+                    ln,
+                    ds_historico=_APLICACAO_DS_HISTORICO,
+                    id_plano=_APLICACAO_ID_PLANO,
                 )
-                ok = "[Sucesso]" in resp
-                item["status"] = "gravado" if ok else "erro"
-                item["gravou"] = ok
-                item["endpoint"] = (
-                    "/mgerencia/scripts/fiscal/compras/actions/criar.consumo.snf"
+                executados.append(item)
+                continue
+
+            if classe == "tarifa":
+                item = _gravar_despesa_snf(
+                    opener,
+                    item,
+                    ln,
+                    ds_historico=_TARIFA_DS_HISTORICO,
+                    id_plano=_TARIFA_ID_PLANO,
                 )
-                item["resposta"] = (resp or "")[:300]
-                if not ok:
-                    item["motivo"] = "Resposta sem [Sucesso]."
-            except Exception as exc:  # noqa: BLE001
-                item["status"] = "erro"
-                item["gravou"] = False
-                item["motivo"] = str(exc)
+                executados.append(item)
+                continue
+
+            if classe in ("resgate", "rentabilidade"):
+                hist = "resgate" if classe == "resgate" else "rentabilidade"
+                item, criado = _gravar_receita_e_baixa(
+                    opener, item, ln, ds_historico=hist
+                )
+                if criado is not None:
+                    criados.append(criado)
+                executados.append(item)
+                continue
+
+        except Exception as exc:  # noqa: BLE001
+            item["status"] = "erro"
+            item["gravou"] = False
+            item["motivo"] = str(exc)
             executados.append(item)
             continue
 
-        # demais classes: stub (sem endpoint capturado)
+        # liquidação / demais: stub (endpoint de ligar lote ainda não capturado)
         item["status"] = "stub_noop"
         item["gravou"] = False
         item["motivo"] = (
-            "AVISO: modo executar — escrita só implementada para aplicacao "
-            "(criar.consumo.snf). Demais classes: use a tela."
+            "AVISO: modo executar — escrita implementada para aplicacao, "
+            "tarifa, rentabilidade e resgate. "
+            f"Classe '{classe}': use a tela (ligar lote sem captura)."
         )
-        if classe in ("resgate", "rentabilidade"):
-            criados.append({**item, "tipo": "receita_avulsa_pendente_tela"})
         executados.append(item)
     return criados, executados
 
