@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decide a conciliação. O agente não escolhe. Fonte: skill 1.34.0."""
+"""Decide a conciliação. O agente não escolhe. Fonte: skill 1.37.0."""
 import json
 import sys
 import unicodedata
@@ -55,7 +55,7 @@ def pares_cartao(ext, rec):
 
 
 def decidir(ext, rec, pag):
-    """Aplica a skill 1.34.0. Retorna lista de linhas com veredito/acao/id."""
+    """Aplica a skill 1.37.0. Retorna lista de linhas com veredito/acao/id."""
     desdobra = pares_cartao(ext, rec)
     out = []
     for i, linha in enumerate(ext):
@@ -92,7 +92,7 @@ def decidir(ext, rec, pag):
             )
             continue
         if classe == "rentabilidade":
-            # Skill 1.34.0: criar e baixar (GRAVAR). Nunca Pix/ARIADNA.
+            # Skill 1.37.0: criar e baixar (GRAVAR). Nunca Pix/ARIADNA.
             out.append(
                 {
                     **linha,
@@ -106,7 +106,7 @@ def decidir(ext, rec, pag):
             )
             continue
         if classe == "aplicacao":
-            # Skill 1.34.0: 1200 Mais despesa, 30060005, GRAVAR. Nunca ARIADNA.
+            # Skill 1.37.0: 1200 Mais despesa, 30060005, GRAVAR. Nunca ARIADNA.
             out.append(
                 {
                     **linha,

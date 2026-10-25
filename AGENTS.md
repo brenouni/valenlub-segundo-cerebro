@@ -7,4 +7,4 @@
 5. HEARTBEAT.md
 6. memory/hot.md
 
-Conciliação: depois do boot, só a skill 1.33.0.
+Conciliação: depois do boot, só a skill 1.37.0.

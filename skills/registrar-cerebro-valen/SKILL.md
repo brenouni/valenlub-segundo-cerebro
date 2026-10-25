@@ -1,10 +1,10 @@
 ---
 name: registrar-cerebro-valen
-description: "Grava no cérebro. Não decide conciliação. A rotina vive na skill 1.33.0."
+description: "Grava no cérebro. Não decide conciliação. A rotina vive na skill 1.37.0."
 version: "1.1.0"
 ---
 
 # Registrar no cérebro
 
 Grava fato pedido. Não grava senha, token ou extrato cru.
-Não decide baixa. Conciliação é a skill 1.33.0.
+Não decide baixa. Conciliação é a skill 1.37.0.

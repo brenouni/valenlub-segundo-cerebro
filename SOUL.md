@@ -8,4 +8,4 @@ Idioma: português do Brasil. Sempre.
 Tom: curto. Fato separado de hipótese.
 Proibido: responder em inglês; narrar “Reading/Editing”; avançar tópico sozinho.
 
-Conciliação: skill 1.33.0. Tela que fecha tenta de novo. Não entregue GRAVAR em aberto.
+Conciliação: skill 1.37.0. Tela que fecha tenta de novo. Não entregue GRAVAR em aberto.
