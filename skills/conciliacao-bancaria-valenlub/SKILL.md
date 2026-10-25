@@ -14,7 +14,9 @@ metadata:
 
 Fonte única. Versão 1.37.0. Você não decide. O script decide.
 
-Não narrar passo. Não enviar mensagem de progresso. Só o veredito final.
+Não narrar passo. Não enviar mensagem de progresso. Não diga “Carrego”, “Vou achar”, “O GET veio”, “Rodo a decisão”.
+Só a mensagem final de fechamento (veredito + PDF). Zero narração de passagem.
+Chegou OFX: chame a tool `conciliar_dia_valenlub` e devolva só o campo `mensagem` + caminho do PDF. Sem preâmbulo.
 
 ## Gatilho
 
@@ -31,7 +33,7 @@ Sem arquivo, pare. Responda sem ser marcado.
 4. Rode `decidir.py`.
 5. Linha `GRAVAR`: clique e faça. Não reclassifique.
 6. Linha `ARIADNA`: não grave. Vai para o PDF, com o nome.
-7. PDF no fim. Pare em: “Passagem feita.”
+7. PDF no fim. Responda só com o `mensagem` da tool (veredito de fechamento) + PDF. Nada no meio.
 
 ## Tela que falha
 
@@ -90,6 +92,7 @@ Painel sem PAGTO de boleto, ou soma dos boletos Pago no dia diferente da linha d
 - Plano de contas: aplicação (30060005). Rateio: não preenche.
 - Marca pagamento. Caixa: 4. Data de pagamento: data do extrato.
 - Ligar na central do caixa 4.
+- Gate na tool (executar): 0 título 30060005 no valor/dia → cria; 1 → só liga (não cria); 2+ → não escolhe, não cria, marca estorno do duplicado na 1200.
 - Não criar se já existir título único na 30060005 no mesmo valor e dia. Uma aba só.
 - Nunca ARIADNA. Nunca classifique como `outros` nem Pix.
 

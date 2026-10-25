@@ -3,11 +3,12 @@
 CONCILIAR_DIA_VALENLUB = {
     "name": "conciliar_dia_valenlub",
     "description": (
-        "Concilia o caixa 4 da ValenLub no dia informado (skill conciliacao-bancaria-valenlub 1.33.0). "
+        "Concilia o caixa 4 da ValenLub no dia informado (skill conciliacao-bancaria-valenlub 1.37.0). "
         "Lê o OFX do dia, faz GET read-only em contas-receber e contas-a-pagar na API Query, "
         "aplica as regras (GRAVAR/ARIADNA), em modo simular não grava, em executar só o que a regra fecha "
         "grava no Query (aplicacao/tarifa/resgate/liquidacao), gera o PDF no visual aprovado e "
-        "retorna status, contagens, criados, ariadna e pdf_path. "
+        "retorna status, contagens, criados, ariadna, pdf_path e mensagem (veredito final). "
+        "Ao usuário: envie SÓ o campo mensagem + PDF. Zero narração de passagem. "
         "Use quando chegar OFX/extrato/CSV Cielo do caixa 4."
     ),
     "parameters": {

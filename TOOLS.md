@@ -6,3 +6,4 @@ Permitido
 - Este cérebro
 
 Conciliação: só a 1.37.0 decide o que grava.
+Só a mensagem final de fechamento (veredito + PDF). Zero narração de passagem.

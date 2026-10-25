@@ -1224,7 +1224,232 @@ def _gravar_liquidacao(opener: Any, item: dict, ln: dict) -> dict:
 
 
 
-def _executar_gravar(linhas_gravar: list[dict], modo: str) -> tuple[list[dict], list[dict]]:
+def _plano_do_titulo(t: dict) -> str:
+    """Extrai id do plano de contas do título (raw defensivo)."""
+    raw = t.get("raw") if isinstance(t.get("raw"), dict) else {}
+    for src in (raw, t):
+        if not isinstance(src, dict):
+            continue
+        for k in (
+            "idPlanoDeContasSubconta",
+            "id_plano",
+            "idPlano",
+            "conta",
+            "plano",
+            "cdPlano",
+            "codigoPlano",
+            "idPlanoContas",
+            "Financeiro_PlanoDeContas_Subcontas_id",
+        ):
+            v = src.get(k)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+        nested = src.get("planoDeContas") or src.get("subconta") or src.get("plano_de_contas")
+        if isinstance(nested, dict):
+            for k in ("id", "codigo", "cd", "idPlanoDeContasSubconta"):
+                if nested.get(k) is not None and str(nested.get(k)).strip():
+                    return str(nested.get(k)).strip()
+    blob = " ".join(str(v) for v in (raw or {}).values() if v is not None)
+    if _APLICACAO_ID_PLANO in blob:
+        return _APLICACAO_ID_PLANO
+    return ""
+
+
+def _data_do_titulo(t: dict) -> str:
+    """Data do título (baixa/vencimento/pagamento) se houver."""
+    raw = t.get("raw") if isinstance(t.get("raw"), dict) else {}
+    for src in (raw, t):
+        if not isinstance(src, dict):
+            continue
+        for k in (
+            "dtBaixa",
+            "dt_baixa",
+            "dtVencimento",
+            "dt_vencimento",
+            "dtPagamento",
+            "dt_pagamento",
+            "dtCompetencia",
+            "data",
+            "dt",
+        ):
+            v = src.get(k)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+    return ""
+
+
+def _mesmo_dia_titulo(dia_linha: str, dia_tit: str) -> bool:
+    """True se datas batem; se título sem data, aceita (casa só valor+plano)."""
+    if not (dia_tit or "").strip():
+        return True
+    dl = (dia_linha or "").strip()
+    dt = dia_tit.strip()
+    if not dl:
+        return True
+    # normaliza pedaços YYYY-MM-DD / DD/MM/YYYY / DD-MM-YYYY
+    def parts(s: str) -> set[str]:
+        s2 = s.replace("T", " ").split()[0]
+        out = {s2, s2.replace("/", "-")}
+        m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", s2)
+        if m:
+            y, mo, d = m.groups()
+            out.update({f"{d}/{mo}/{y}", f"{d}-{mo}-{y}", f"{y}-{mo}-{d}"})
+        m = re.match(r"^(\d{2})[/\-](\d{2})[/\-](\d{4})", s2)
+        if m:
+            d, mo, y = m.groups()
+            out.update({f"{y}-{mo}-{d}", f"{d}/{mo}/{y}", f"{d}-{mo}-{y}"})
+        return out
+
+    return bool(parts(dl) & parts(dt))
+
+
+def _candidatos_aplicacao(pagar: list[dict] | None, valor: float, dia: str) -> list[dict]:
+    """Títulos 30060005 no mesmo valor (±0,02); filtra dia quando raw tem data."""
+    out: list[dict] = []
+    for t in pagar or []:
+        try:
+            tv = abs(float(t.get("valor") or 0))
+        except (TypeError, ValueError):
+            continue
+        if abs(tv - abs(float(valor))) > 0.02:
+            continue
+        if _plano_do_titulo(t) != _APLICACAO_ID_PLANO:
+            continue
+        if not _mesmo_dia_titulo(dia, _data_do_titulo(t)):
+            continue
+        out.append(t)
+    return out
+
+
+def _id_mov_do_titulo(t: dict) -> str | None:
+    raw = t.get("raw") if isinstance(t.get("raw"), dict) else {}
+    for src in (raw, t):
+        if not isinstance(src, dict):
+            continue
+        for k in (
+            "idMovimentacao",
+            "id_movimentacao",
+            "Financeiro_Caixas_Movimentacoes_id",
+            "idMovimento",
+            "idBaixa",
+            "id_baixa",
+            "idMovimentacaoCaixa",
+        ):
+            v = src.get(k)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+    return None
+
+
+def _ligar_aplicacao(opener: Any, item: dict, ln: dict, titulo: dict) -> dict:
+    """Liga extrato ↔ movimentação do título 30060005 único (não cria)."""
+    data_ex = _data_linha(ln)
+    valor = abs(float(ln.get("valor") or 0))
+    txs = query_extrato_pendente(opener, id_caixa=_ID_CAIXA, data_extrato=data_ex)
+    cand: list[dict] = []
+    for t in txs:
+        try:
+            vr = abs(float(t.get("vr") or t.get("valor") or 0))
+        except (TypeError, ValueError):
+            continue
+        if abs(vr - valor) > 0.02:
+            continue
+        cand.append(t)
+    aplic = [
+        t
+        for t in cand
+        if "APLIC" in str(t.get("hist") or t.get("dsHistorico") or "").upper()
+    ]
+    tx = (aplic or cand or [None])[0]
+    if not tx:
+        item["status"] = "ja_existe_ligar"
+        item["gravou"] = False
+        item["id_titulo"] = titulo.get("id")
+        item["motivo"] = (
+            f"Título único {titulo.get('id')} 30060005 existe; "
+            f"extrato pendente não encontrado (caixa {_ID_CAIXA}, "
+            f"data {data_ex}, valor {valor:.2f}) — ligar via conciliar."
+        )
+        return item
+    id_extrato = str(tx.get("id") or tx.get("Financeiro_Caixas_Extratos_id") or "")
+    if not id_extrato:
+        item["status"] = "ja_existe_ligar"
+        item["gravou"] = False
+        item["id_titulo"] = titulo.get("id")
+        item["motivo"] = "Linha de extrato sem id — ligar título único via conciliar."
+        return item
+
+    mid = _id_mov_do_titulo(titulo)
+    if not mid:
+        movs = query_movimentacoes_para_alvo(
+            opener, id_caixa=_ID_CAIXA, data_extrato=data_ex, valor=valor, tp="Debito"
+        )
+        tid = str(titulo.get("id") or "")
+        pool: list[tuple[str, float]] = []
+        for m in movs:
+            mmid = m.get("idMovimentacao") or m.get("id")
+            if mmid is None:
+                continue
+            try:
+                vr = abs(float(m.get("vr") or m.get("valor") or 0))
+            except (TypeError, ValueError):
+                continue
+            if abs(vr - valor) > 0.02:
+                continue
+            blob = " ".join(str(m.get(k) or "") for k in m)
+            if tid and tid in blob:
+                mid = str(mmid)
+                break
+            pool.append((str(mmid), vr))
+        if not mid and len(pool) == 1:
+            mid = pool[0][0]
+        if not mid and pool:
+            ids = _subset_sum_ids(pool, valor)
+            if ids and len(ids) == 1:
+                mid = ids[0]
+
+    if not mid:
+        item["status"] = "ja_existe_ligar"
+        item["gravou"] = False
+        item["id_titulo"] = titulo.get("id")
+        item["id_extrato"] = id_extrato
+        item["motivo"] = (
+            f"Título único {titulo.get('id')} 30060005 — extrato {id_extrato} achado; "
+            "sem idMovimentacao no raw. Ligue via conciliar na central."
+        )
+        return item
+
+    resp = query_conciliar_lote(
+        opener, id_extrato=id_extrato, ids_movimentacao=[mid]
+    )
+    ok = False
+    try:
+        js = json.loads(resp)
+        ok = bool(js.get("isOk")) or "sucesso" in str(js.get("message") or "").lower()
+        item["resposta"] = json.dumps(js, ensure_ascii=False)[:300]
+        item["vinculadas"] = js.get("vinculadas")
+    except json.JSONDecodeError:
+        ok = "[Sucesso]" in resp or "sucesso" in resp.lower()
+        item["resposta"] = (resp or "")[:300]
+    item["status"] = "gravado" if ok else "erro"
+    item["gravou"] = ok
+    item["endpoint"] = (
+        "/mgerencia/scripts/financeiro/conciliacao/actions&id=conciliar"
+    )
+    item["id_extrato"] = id_extrato
+    item["ids_movimentacao"] = [mid]
+    item["id_titulo"] = titulo.get("id")
+    item["tipo"] = "aplicacao_ligada"
+    if not ok:
+        item["motivo"] = "Conciliação aplicação sem isOk."
+    return item
+
+
+def _executar_gravar(
+    linhas_gravar: list[dict],
+    modo: str,
+    pagar: list[dict] | None = None,
+) -> tuple[list[dict], list[dict]]:
     """Em simular: não escreve. Em executar: aplicação/tarifa/receita/liquidação."""
     criados: list[dict] = []
     executados: list[dict] = []
@@ -1245,7 +1470,19 @@ def _executar_gravar(linhas_gravar: list[dict], modo: str) -> tuple[list[dict], 
             if classe in ("resgate", "rentabilidade"):
                 criados.append({**item, "tipo": "receita_avulsa_seria_criada"})
             if classe == "aplicacao":
-                item["tipo"] = "despesa_aplicacao_seria_criada"
+                v = abs(float(ln.get("valor") or 0))
+                cands = _candidatos_aplicacao(pagar, v, _data_linha(ln))
+                if len(cands) == 1:
+                    item["tipo"] = "aplicacao_seria_ligada"
+                    item["id_titulo"] = cands[0].get("id")
+                elif len(cands) >= 2:
+                    item["tipo"] = "aplicacao_bloqueio_duplicado"
+                    item["status"] = "bloqueio_duplicado"
+                    item["motivo"] = (
+                        "Vários 30060005 no valor/dia — estornar duplicado na 1200."
+                    )
+                else:
+                    item["tipo"] = "despesa_aplicacao_seria_criada"
             if classe == "tarifa":
                 item["tipo"] = "despesa_tarifa_seria_criada"
             if classe == "liquidacao":
@@ -1259,13 +1496,25 @@ def _executar_gravar(linhas_gravar: list[dict], modo: str) -> tuple[list[dict], 
                     opener = mgerencia_session()
 
             if classe == "aplicacao":
-                item = _gravar_despesa_snf(
-                    opener,
-                    item,
-                    ln,
-                    ds_historico=_APLICACAO_DS_HISTORICO,
-                    id_plano=_APLICACAO_ID_PLANO,
-                )
+                v = abs(float(ln.get("valor") or 0))
+                cands = _candidatos_aplicacao(pagar, v, _data_linha(ln))
+                if len(cands) == 1:
+                    item = _ligar_aplicacao(opener, item, ln, cands[0])
+                elif len(cands) >= 2:
+                    item["status"] = "bloqueio_duplicado"
+                    item["gravou"] = False
+                    item["motivo"] = (
+                        "Vários 30060005 no valor/dia — estornar duplicado na 1200."
+                    )
+                    item["ids_titulos"] = [c.get("id") for c in cands]
+                else:
+                    item = _gravar_despesa_snf(
+                        opener,
+                        item,
+                        ln,
+                        ds_historico=_APLICACAO_DS_HISTORICO,
+                        id_plano=_APLICACAO_ID_PLANO,
+                    )
                 executados.append(item)
                 continue
 
@@ -1312,6 +1561,170 @@ def _executar_gravar(linhas_gravar: list[dict], modo: str) -> tuple[list[dict], 
         )
         executados.append(item)
     return criados, executados
+
+
+
+def _mensagem_fechamento(
+    data: str,
+    caixa: int,
+    modo: str,
+    decisoes: list[dict],
+    executados: list[dict],
+    ariadna: list[dict],
+    pdf_path: str | None,
+) -> str:
+    """Único texto a enviar ao usuário — veredito final, sem narração."""
+    try:
+        dt = datetime.strptime(data[:10], "%Y-%m-%d")
+        dia_br = dt.strftime("%d/%m")
+    except ValueError:
+        dia_br = data
+    ligadas = sum(
+        1
+        for e in executados
+        if e.get("status") in ("gravado", "simulado")
+        or e.get("gravou") is True
+    )
+    # bloqueios / ja_existe contam como tratados mas não ligados
+    bloqueios = [e for e in executados if e.get("status") in (
+        "bloqueio_duplicado", "ja_existe_ligar", "erro", "stub_noop"
+    )]
+    falta = len(ariadna) + sum(
+        1 for e in bloqueios if e.get("status") in ("bloqueio_duplicado", "ja_existe_ligar", "erro", "stub_noop")
+    )
+    # entrada/saída do OFX
+    ent = sai = 0.0
+    for d in decisoes:
+        try:
+            v = float(d.get("valor") or 0)
+        except (TypeError, ValueError):
+            continue
+        # sinal: se houver campo tipo/direcao
+        sinal = str(d.get("tipo") or d.get("trntype") or d.get("sentido") or "").upper()
+        if sinal in ("CREDIT", "CREDITO", "C", "ENTRADA"):
+            ent += abs(v)
+        elif sinal in ("DEBIT", "DEBITO", "D", "SAIDA"):
+            sai += abs(v)
+        else:
+            # classes tipicamente saída
+            cl = (d.get("classe") or "").lower()
+            if cl in ("aplicacao", "tarifa", "pix"):
+                # pix pode ser entrada; se valor negativo no raw...
+                if v < 0 or cl in ("aplicacao", "tarifa"):
+                    sai += abs(v)
+                else:
+                    ent += abs(v)
+            elif cl in ("resgate", "rentabilidade", "liquidacao", "boleto", "cartao"):
+                ent += abs(v)
+            else:
+                ent += abs(v) if v >= 0 else 0
+                sai += abs(v) if v < 0 else 0
+    def _br(n: float) -> str:
+        return f"{n:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    fecha_txt = ""
+    if abs(ent - sai) <= 0.02 and (ent or sai):
+        fecha_txt = f" Entrada e saída fecham em {_br(ent)}."
+    elif ent or sai:
+        fecha_txt = f" Entrada {_br(ent)}; saída {_br(sai)}."
+    n_grav = sum(1 for e in executados if e.get("status") == "gravado" or e.get("gravou") is True)
+    head = (
+        f"Dia {dia_br}, caixa {caixa}.{fecha_txt} "
+        f"Na central: {ligadas} ligadas, {len(ariadna)} em falta, ajuste 0."
+    )
+    if modo == "executar" and executados:
+        head += f" Executar: {n_grav}/{len(executados)} gravado."
+    elif modo == "simular":
+        head += f" Simular. GRAVAR {len(executados)}. ARIADNA {len(ariadna)}."
+
+    blocos: list[str] = []
+    by_cl: dict[str, list[dict]] = {}
+    for e in executados:
+        by_cl.setdefault((e.get("classe") or "outros").lower(), []).append(e)
+    for a in ariadna:
+        by_cl.setdefault((a.get("classe") or "outros").lower(), []).append(
+            {**a, "status": "ariadna"}
+        )
+
+    def _vf(x: Any) -> str:
+        try:
+            return f"{float(x):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        except (TypeError, ValueError):
+            return str(x or "")
+
+    if "cartao" in by_cl:
+        itens = by_cl["cartao"]
+        partes = []
+        for e in itens:
+            st = e.get("status")
+            if st == "gravado" or e.get("gravou"):
+                partes.append(f"{_vf(e.get('valor'))} ligado")
+            elif st == "ariadna":
+                partes.append(f"{_vf(e.get('valor'))} em falta")
+            else:
+                partes.append(f"{_vf(e.get('valor'))} ({st})")
+        blocos.append("Cartão. " + "; ".join(partes) + ".")
+    if "pix" in by_cl:
+        for e in by_cl["pix"]:
+            if e.get("status") == "ariadna":
+                blocos.append(
+                    f"Pix {_vf(e.get('valor'))}. {e.get('acao') or 'Em falta.'}"
+                )
+            else:
+                blocos.append(
+                    f"Pix {_vf(e.get('valor'))}. "
+                    + ("Ligado." if e.get("gravou") or e.get("status") == "gravado" else (e.get("motivo") or e.get("status") or ""))
+                )
+    if "aplicacao" in by_cl:
+        for e in by_cl["aplicacao"]:
+            v = _vf(e.get("valor"))
+            st = e.get("status")
+            if st == "bloqueio_duplicado":
+                blocos.append(
+                    f"Aplicação {v}. Travou na escolha. São dois ou mais títulos "
+                    "do mesmo valor. Não escolhi e não criei o terceiro. "
+                    "O duplicado se estorna na 1200."
+                )
+            elif st == "ja_existe_ligar":
+                blocos.append(
+                    f"Aplicação {v}. Título único já existe; "
+                    f"{e.get('motivo') or 'ligar via conciliar.'}"
+                )
+            elif st == "gravado" or e.get("gravou"):
+                tip = e.get("tipo") or ""
+                if tip == "aplicacao_ligada":
+                    blocos.append(f"Aplicação {v}. Ligada no título existente.")
+                else:
+                    blocos.append(f"Aplicação {v}. Criada e baixada.")
+            elif st == "simulado":
+                tip = e.get("tipo") or ""
+                if tip == "aplicacao_bloqueio_duplicado":
+                    blocos.append(
+                        f"Aplicação {v}. [simular] bloqueio duplicado — estornar na 1200."
+                    )
+                elif tip == "aplicacao_seria_ligada":
+                    blocos.append(f"Aplicação {v}. [simular] ligaria o título único.")
+                else:
+                    blocos.append(f"Aplicação {v}. [simular] criaria despesa.")
+            else:
+                blocos.append(f"Aplicação {v}. {e.get('motivo') or st or ''}")
+
+    for cl in sorted(by_cl):
+        if cl in ("cartao", "pix", "aplicacao"):
+            continue
+        for e in by_cl[cl]:
+            if e.get("status") == "ariadna":
+                blocos.append(
+                    f"{cl.capitalize()} {_vf(e.get('valor'))}. "
+                    f"{e.get('acao') or 'Em falta.'}"
+                )
+
+    body = "\n\n".join(blocos)
+    pdf_line = f"\nPDF: {pdf_path}" if pdf_path else ""
+    if body:
+        return f"{head}\n\n{body}{pdf_line}".strip()
+    return f"{head}{pdf_line}".strip()
+
 
 
 # ---------------------------------------------------------------------------
@@ -1525,7 +1938,7 @@ def conciliar_dia_valenlub(
     gravar = [d for d in decisoes if d.get("veredito") == "GRAVAR"]
     ariadna = [d for d in decisoes if d.get("veredito") == "ARIADNA"]
 
-    criados, executados = _executar_gravar(gravar, modo)
+    criados, executados = _executar_gravar(gravar, modo, pagar=pagar)
 
     if pdf_path is None:
         out_dir = ROOT / "cache" / "conciliacao"
@@ -1573,22 +1986,8 @@ def conciliar_dia_valenlub(
         pdf_path=pdf_ok,
         erros=erros,
         executados=executados,
-        mensagem=(
-            (
-                "Passagem feita."
-                if not ariadna
-                else f"Passagem feita. ARIADNA {len(ariadna)}."
-            )
-            + (
-                (
-                    f" Executar: {sum(1 for e in executados if e.get('status')=='gravado')}"
-                    f"/{len(executados)} gravado."
-                    if executados
-                    else " Executar: nada a gravar."
-                )
-                if modo == "executar"
-                else ""
-            )
+        mensagem=_mensagem_fechamento(
+            data, caixa, modo, decisoes, executados, ariadna, pdf_ok
         ),
     )
 

@@ -8,3 +8,4 @@
 | relatorio-08h | Relator | inadimplência |
 
 Conciliação: só a 1.37.0.
+Só a mensagem final de fechamento (veredito + PDF). Zero narração de passagem.

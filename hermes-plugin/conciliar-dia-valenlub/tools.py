@@ -42,7 +42,11 @@ def _load_fn():
 
 
 def conciliar_dia_valenlub(args: dict, **kwargs) -> str:
-    """Handler Hermes. Sempre retorna JSON string."""
+    """Handler Hermes. Sempre retorna JSON string.
+
+    O campo mensagem do resultado é o único texto a enviar ao usuário
+    (veredito final + PDF). Zero narração de passagem.
+    """
     del kwargs
     try:
         fn, _root = _load_fn()
