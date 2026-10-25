@@ -12,7 +12,7 @@ metadata:
 
 # Relatório da conciliação
 
-Não decide baixa. A regra vive em `conciliacao-bancaria-valenlub`, versão 1.38.0.
+Não decide baixa. A regra vive em `conciliacao-bancaria-valenlub`, versão 1.38.1.
 
 ## Quando emitir
 

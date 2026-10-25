@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conciliação do caixa 4 ValenLub — skill 1.38.0.
+"""Conciliação do caixa 4 ValenLub — skill 1.38.1.
 
 Função principal: conciliar_dia_valenlub(...)
 
@@ -224,8 +224,7 @@ def _classify_line(nome: str, memo: str = "", trntype: str = "") -> str:
         return "boleto"
     if "PIX" in blob_n:
         return "pix"
-    if trntype.upper() in ("CREDIT", "DEP", "DIRECTDEP"):
-        return "pix"
+    # CREDIT/DEP sozinho NÃO é Pix — exige PIX no histórico/memo.
     if trntype.upper() in ("DEBIT", "XFER", "PAYMENT"):
         return "outros"
     return "outros"
@@ -1106,6 +1105,16 @@ def _data_linha(ln: dict) -> str:
     )
 
 
+def _prefer_hist_despesa(id_plano: str, ds_historico: str) -> tuple[str, ...]:
+    if id_plano == _APLICACAO_ID_PLANO or "aplic" in (ds_historico or "").lower():
+        return ("APLIC", "APLICACAO", "APLIC.")
+    if id_plano == _TARIFA_ID_PLANO or "tarif" in (ds_historico or "").lower():
+        return ("TARIFA", "TX ", "TAXA")
+    return tuple(
+        p for p in ((ds_historico or "").upper().split()[:2]) if len(p) >= 3
+    )
+
+
 def _gravar_despesa_snf(
     opener: Any,
     item: dict,
@@ -1114,6 +1123,7 @@ def _gravar_despesa_snf(
     ds_historico: str,
     id_plano: str,
     id_caixa: str | int | None = None,
+    prefer_hist: tuple[str, ...] = (),
 ) -> dict:
     resp = query_criar_consumo_snf(
         opener,
@@ -1123,7 +1133,8 @@ def _gravar_despesa_snf(
         id_plano=id_plano,
         id_caixa=id_caixa,
     )
-    ok = "[Sucesso]" in resp
+    ok = "[Sucesso]" in (resp or "")
+    id_tit = _parse_id_cobranca_sucesso(resp or "")
     item["status"] = "gravado" if ok else "erro"
     item["gravou"] = ok
     item["endpoint"] = (
@@ -1132,12 +1143,22 @@ def _gravar_despesa_snf(
     item["plano"] = id_plano
     item["historico"] = ds_historico
     item["resposta"] = (resp or "")[:300]
+    if id_tit:
+        item["id_titulo"] = id_tit
+        item["id_cobranca"] = id_tit
     if not ok:
         item["motivo"] = "Resposta sem [Sucesso]."
         return item
-    # Fecha a linha OFX na 1311 após criar+baixar
+    ph = prefer_hist or _prefer_hist_despesa(id_plano, ds_historico)
+    # Fecha a linha OFX na 1311 após criar+baixar (com id + hist preferido)
     item = _ligar_extrato_apos_criar(
-        opener, item, ln, id_caixa=id_caixa, tp="Debito"
+        opener,
+        item,
+        ln,
+        id_caixa=id_caixa,
+        tp="Debito",
+        id_titulo=id_tit,
+        prefer_hist=ph,
     )
     return item
 
@@ -1199,8 +1220,19 @@ def _gravar_receita_e_baixa(
         return item, criado
     criado["status"] = "criado"
     criado["baixado"] = True
+    hist_l = (ds_historico or "").lower()
+    if "rentab" in hist_l or "rend" in hist_l:
+        ph = ("RENTAB", "RENTABILIDADE", "RENDIMENTO", "RENDTO")
+    else:
+        ph = ("RESGATE", "RESG")
     item = _ligar_extrato_apos_criar(
-        opener, item, ln, id_caixa=id_caixa, tp="Credito", id_titulo=id_cob
+        opener,
+        item,
+        ln,
+        id_caixa=id_caixa,
+        tp="Credito",
+        id_titulo=id_cob,
+        prefer_hist=ph,
     )
     return item, criado
 
@@ -1769,13 +1801,13 @@ def _data_do_titulo(t: dict) -> str:
 
 
 def _mesmo_dia_titulo(dia_linha: str, dia_tit: str) -> bool:
-    """True se datas batem; se título sem data, aceita (casa só valor+plano)."""
+    """True só se datas batem. Título sem data → False (não casa)."""
     if not (dia_tit or "").strip():
-        return True
+        return False
     dl = (dia_linha or "").strip()
     dt = dia_tit.strip()
     if not dl:
-        return True
+        return False
     # normaliza pedaços YYYY-MM-DD / DD/MM/YYYY / DD-MM-YYYY
     def parts(s: str) -> set[str]:
         s2 = s.replace("T", " ").split()[0]
@@ -1820,7 +1852,7 @@ def _candidatos_plano(
     id_plano: str,
     hist_keywords: tuple[str, ...] = (),
 ) -> list[dict]:
-    """Gate 0/1/N: valor±0,02 + (plano OU histórico) + mesmo dia."""
+    """Gate 0/1/N: valor±0,02 + mesmo dia (data obrigatória) + (plano OU hist OU fallback)."""
     out: list[dict] = []
     alvo = abs(float(valor))
     kws = tuple(k.upper() for k in hist_keywords if k)
@@ -1831,16 +1863,20 @@ def _candidatos_plano(
             continue
         if abs(tv - alvo) > 0.02:
             continue
-        if not _mesmo_dia_titulo(dia, _data_do_titulo(t)):
+        dia_tit = _data_do_titulo(t)
+        if not _mesmo_dia_titulo(dia, dia_tit):
             continue
         plano = _plano_do_titulo(t)
         if plano == id_plano:
             out.append(t)
             continue
-        if not plano and kws:
-            hist = _historico_do_titulo(t)
-            if any(k in hist for k in kws):
-                out.append(t)
+        hist = _historico_do_titulo(t)
+        if not plano and kws and any(k in hist for k in kws):
+            out.append(t)
+            continue
+        # fallback: plano+histórico vazios → valor±0,02 + mesmo dia (data já presente)
+        if not plano and not (hist or "").strip():
+            out.append(t)
     return out
 
 
@@ -2071,7 +2107,37 @@ def _executar_gravar(
             elif classe in ("liquidacao", "boleto"):
                 item["tipo"] = "lote_boleto_seria_conciliado"
             elif classe in ("cartao", "pix"):
-                if ln.get("id"):
+                if classe == "cartao" and ln.get("id"):
+                    acao = str(ln.get("acao") or "")
+                    v = abs(float(ln.get("valor") or 0))
+                    tid = ln.get("id")
+                    tit_valor = None
+                    for tt in (receber or []):
+                        if str(tt.get("id") or "") == str(tid):
+                            try:
+                                tit_valor = abs(float(tt.get("valor") or 0))
+                            except (TypeError, ValueError):
+                                tit_valor = None
+                            break
+                    n_mesmo = sum(
+                        1
+                        for x in linhas_gravar
+                        if (x.get("classe") or "").lower() == "cartao"
+                        and str(x.get("id") or "") == str(tid)
+                    )
+                    if (
+                        "desdobre" in acao.lower()
+                        or n_mesmo >= 2
+                        or (tit_valor is not None and abs(v - tit_valor) > 0.02)
+                    ):
+                        item["tipo"] = "cartao_bloqueio_desdobro"
+                        item["status"] = "bloqueio_desdobro"
+                        item["motivo"] = (
+                            "Cartão desdobrado — não ligar pedaço; desdobrar na tela."
+                        )
+                    else:
+                        item["tipo"] = "cartao_seria_ligado"
+                elif ln.get("id"):
                     item["tipo"] = f"{classe}_seria_ligado"
                 else:
                     item["tipo"] = f"{classe}_sem_titulo"
@@ -2174,10 +2240,44 @@ def _executar_gravar(
 
             if classe == "cartao":
                 tid = ln.get("id")
+                v = abs(float(ln.get("valor") or 0))
+                acao = str(ln.get("acao") or "")
                 if not tid:
                     item["status"] = "stub_noop"
                     item["gravou"] = False
                     item["motivo"] = "Cartão GRAVAR sem id de título — use a tela."
+                    executados.append(item)
+                    continue
+                # Desdobro: não ligar pedaço no título inteiro
+                tit_valor = None
+                for tt in (receber or []):
+                    if str(tt.get("id") or "") == str(tid):
+                        try:
+                            tit_valor = abs(float(tt.get("valor") or 0))
+                        except (TypeError, ValueError):
+                            tit_valor = None
+                        break
+                # ocorrências deste tid entre cartões GRAVAR
+                n_mesmo_id = sum(
+                    1
+                    for x in linhas_gravar
+                    if (x.get("classe") or "").lower() == "cartao"
+                    and str(x.get("id") or "") == str(tid)
+                )
+                is_desdobro = (
+                    "desdobre" in acao.lower()
+                    or n_mesmo_id >= 2
+                    or (tit_valor is not None and abs(v - tit_valor) > 0.02)
+                )
+                if is_desdobro:
+                    item["status"] = "bloqueio_desdobro"
+                    item["gravou"] = False
+                    item["id_titulo"] = tid
+                    item["motivo"] = (
+                        f"Cartão desdobrado: linha {v:.2f} ≠ título {tid}"
+                        + (f" ({tit_valor:.2f})" if tit_valor is not None else "")
+                        + " — não ligar pedaço no título inteiro; desdobrar na tela."
+                    )
                     executados.append(item)
                     continue
                 item = _ligar_titulo_na_linha(
@@ -2258,13 +2358,18 @@ def _executar_gravar(
 
 
 
-def _contagens_honestas(executados: list[dict], ariadna: list[dict]) -> tuple[int, int, bool]:
-    """conciliado = só status gravado; falta = ariadna + stubs/bloqueios/erros/ja_*."""
+def _contagens_honestas(
+    executados: list[dict], ariadna: list[dict]
+) -> tuple[int, int, bool, int]:
+    """conciliado=gravado; planejado=simulado; falta=ariadna+stubs/bloqueios/erros/ja_*.
+    simulado conta como planejado — NUNCA fecha o dia."""
     conciliado = sum(1 for e in executados if e.get("status") == "gravado")
+    planejado = sum(1 for e in executados if e.get("status") == "simulado")
     falta_status = {
         "ariadna",
         "stub_noop",
         "bloqueio_duplicado",
+        "bloqueio_desdobro",
         "erro",
         "ja_existe_ligar",
         "ja_pago_painel",
@@ -2272,8 +2377,8 @@ def _contagens_honestas(executados: list[dict], ariadna: list[dict]) -> tuple[in
     falta = len(ariadna) + sum(
         1 for e in executados if e.get("status") in falta_status
     )
-    fechado = falta == 0 and conciliado >= 1
-    return conciliado, falta, fechado
+    fechado = falta == 0 and conciliado >= 1 and planejado == 0
+    return conciliado, falta, fechado, planejado
 
 
 def _totais_entrada_saida(decisoes: list[dict]) -> tuple[float, float]:
@@ -2326,7 +2431,7 @@ def _mensagem_fechamento(
         dia_br = dt.strftime("%d/%m")
     except ValueError:
         dia_br = data
-    conciliado, falta, fechado = _contagens_honestas(executados, ariadna)
+    conciliado, falta, fechado, planejado = _contagens_honestas(executados, ariadna)
     ent, sai = _totais_entrada_saida(decisoes)
 
     def _br(n: float) -> str:
@@ -2347,7 +2452,10 @@ def _mensagem_fechamento(
     if modo == "executar" and executados:
         head += f" Executar: {conciliado}/{len(executados)} gravado."
     elif modo == "simular":
-        head += f" Simular. GRAVAR {len(executados)}. ARIADNA {len(ariadna)}."
+        head += (
+            f" Simular. Planejado {planejado}. GRAVAR {len(executados)}. "
+            f"ARIADNA {len(ariadna)}."
+        )
 
     blocos: list[str] = []
     by_cl: dict[str, list[dict]] = {}
@@ -2373,6 +2481,8 @@ def _mensagem_fechamento(
                 partes.append(f"{_vf(e.get('valor'))} ligado")
             elif st == "ariadna":
                 partes.append(f"{_vf(e.get('valor'))} em falta")
+            elif st == "bloqueio_desdobro":
+                partes.append(f"{_vf(e.get('valor'))} desdobro (bloqueio)")
             else:
                 partes.append(f"{_vf(e.get('valor'))} ({st})")
         blocos.append("Cartão. " + "; ".join(partes) + ".")
@@ -2499,6 +2609,7 @@ def _montar_json_pdf(
         if st in (
             "stub_noop",
             "bloqueio_duplicado",
+            "bloqueio_desdobro",
             "erro",
             "ja_existe_ligar",
             "ja_pago_painel",
@@ -2510,26 +2621,27 @@ def _montar_json_pdf(
                     "acao": e.get("motivo") or st,
                 }
             )
-    conciliado, falta, fechado = _contagens_honestas(executados, ariadna)
+    conciliado, falta, fechado, planejado = _contagens_honestas(executados, ariadna)
     return {
         "data": data,
         "linhas": len(linhas),
         "fecha": data,
         "fechado": fechado,
         "conciliado": conciliado,
+        "planejado": planejado,
         "falta": falta,
         "ajuste": 0,
         "fechou": fechou
         or ([{"classe": "—", "qtd": 0, "feito": "Nada gravado nesta passagem."}] if not falta_linhas else []),
         "falta_linhas": falta_linhas,
         "gravado": (
-            f"Modo {modo}. GRAVAR/conciliado {conciliado}. Falta {falta}."
+            f"Modo {modo}. Conciliado {conciliado}. Planejado {planejado}. Falta {falta}."
             + (
                 " Escrita: aplicacao/tarifa (gate 0/1/N + criar.consumo.snf + conciliar), "
                 "resgate/rentabilidade (gate + criar.novo+baixa + conciliar), "
-                "liquidacao/boleto/cartao/pix (conciliar)."
+                "liquidacao/boleto/cartao/pix (conciliar); desdobro → bloqueio_desdobro."
                 if modo == "executar"
-                else ""
+                else " Simulado não fecha o dia."
             )
         ),
     }
@@ -2589,7 +2701,7 @@ def conciliar_dia_valenlub(
     cielo_csv_path: str | None = None,
     modo: str = "simular",
 ) -> ResultadoConciliacao:
-    """Concilia o caixa 4 do dia. Skill 1.38.0.
+    """Concilia o caixa 4 do dia. Skill 1.38.1.
 
     modo: "simular" (default) ou "executar".
     """
@@ -2709,8 +2821,8 @@ def conciliar_dia_valenlub(
     except Exception as exc:  # noqa: BLE001
         erros.append(f"PDF: {exc}")
 
-    conciliado, falta, fechado = _contagens_honestas(executados, ariadna)
-    status = "fechado" if fechado else ("aberto" if (falta or ariadna) else "ok")
+    conciliado, falta, fechado, planejado = _contagens_honestas(executados, ariadna)
+    status = "fechado" if fechado else ("aberto" if (falta or ariadna or planejado) else "ok")
     if erros and not receber and not pagar:
         status = "parcial"
 
@@ -2724,6 +2836,7 @@ def conciliar_dia_valenlub(
             "gravar": len(gravar),
             "ariadna": len(ariadna),
             "conciliado": conciliado,
+            "planejado": planejado,
             "falta": falta,
             "receber_query": len(receber),
             "pagar_query": len(pagar),
@@ -2767,7 +2880,7 @@ def _hermes_handler(args: dict, **kwargs) -> str:  # noqa: ARG001
 _HERMES_SCHEMA = {
     "name": "conciliar_dia_valenlub",
     "description": (
-        "Concilia o caixa 4 ValenLub no dia informado (skill 1.38.0). "
+        "Concilia o caixa 4 ValenLub no dia informado (skill 1.38.1). "
         "Lê OFX, GET Query contas-receber/contas-a-pagar, decide GRAVAR/ARIADNA, "
         "executa ou simula, gera PDF no visual aprovado."
     ),

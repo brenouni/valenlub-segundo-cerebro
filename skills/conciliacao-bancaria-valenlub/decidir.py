@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Decide a conciliação. O agente não escolhe. Fonte: skill 1.38.0."""
+"""Decide a conciliação. O agente não escolhe. Fonte: skill 1.38.1."""
 import json
+import re
 import sys
 import unicodedata
 
@@ -23,24 +24,79 @@ def cabe(a, b):
     return pa[0] == pb[0] and any(x in b for x in pa[1:]) and len(pa[0]) >= 4
 
 
+def data_tit(t):
+    """Data do título quando disponível (raw.datas / campos)."""
+    raw = t.get("raw") if isinstance(t.get("raw"), dict) else {}
+    datas = raw.get("datas") if isinstance(raw.get("datas"), dict) else {}
+    for src in (datas, raw, t):
+        if not isinstance(src, dict):
+            continue
+        for k in (
+            "dtBaixa",
+            "dt_baixa",
+            "dtCobrancaReceberRecebimento",
+            "dtCobrancaPagarBaixa",
+            "dtVencimentoCobrancaReceber",
+            "dtVencimentoCobrancaPagar",
+            "dtVencimento",
+            "dt_pagamento",
+            "dtPagamento",
+            "data",
+            "dt",
+        ):
+            v = src.get(k)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+    return ""
+
+
+def _parts_dia(s):
+    s2 = (s or "").replace("T", " ").split()[0]
+    out = {s2, s2.replace("/", "-")}
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", s2)
+    if m:
+        y, mo, d = m.groups()
+        out.update({f"{d}/{mo}/{y}", f"{d}-{mo}-{y}", f"{y}-{mo}-{d}"})
+    m = re.match(r"^(\d{2})[/\-](\d{2})[/\-](\d{4})", s2)
+    if m:
+        d, mo, y = m.groups()
+        out.update({f"{y}-{mo}-{d}", f"{d}/{mo}/{y}", f"{d}-{mo}-{y}"})
+    return out
+
+
+def mesmo_dia_quando_ha(linha_data, tit_data):
+    """Se título tem data, exige mesmo dia; se não tem, não filtra."""
+    if not (tit_data or "").strip():
+        return True
+    if not (linha_data or "").strip():
+        return True
+    return bool(_parts_dia(linha_data) & _parts_dia(tit_data))
+
+
 def pares_cartao(ext, rec):
     """Duas linhas de cartão cuja soma é um título."""
     cart = [
-        (i, round(float(l["valor"]), 2))
+        (i, round(float(l["valor"]), 2), l.get("data") or "")
         for i, l in enumerate(ext)
         if (l.get("classe") or "").lower() == "cartao"
     ]
     usado, mapa = set(), {}
     for a in range(len(cart)):
-        ia, va = cart[a]
+        ia, va, da = cart[a]
         if ia in usado:
             continue
         for b in range(a + 1, len(cart)):
-            ib, vb = cart[b]
+            ib, vb, db = cart[b]
             if ib in usado:
                 continue
             soma = round(va + vb, 2)
-            tit = [t for t in rec if abs(round(float(t["valor"]), 2) - soma) <= 0.02]
+            dia = da or db
+            tit = [
+                t
+                for t in rec
+                if abs(round(float(t["valor"]), 2) - soma) <= 0.02
+                and mesmo_dia_quando_ha(dia, data_tit(t))
+            ]
             if len(tit) == 1:
                 t = tit[0]
                 acao = (
@@ -55,7 +111,7 @@ def pares_cartao(ext, rec):
 
 
 def decidir(ext, rec, pag):
-    """Aplica a skill 1.38.0. Retorna lista de linhas com veredito/acao/id."""
+    """Aplica a skill 1.38.1. Retorna lista de linhas com veredito/acao/id."""
     desdobra = pares_cartao(ext, rec)
     out = []
     for i, linha in enumerate(ext):
@@ -92,7 +148,7 @@ def decidir(ext, rec, pag):
             )
             continue
         if classe == "rentabilidade":
-            # Skill 1.38.0: criar e baixar (GRAVAR). Nunca Pix/ARIADNA.
+            # Skill 1.38.1: criar e baixar (GRAVAR). Nunca Pix/ARIADNA.
             out.append(
                 {
                     **linha,
@@ -106,7 +162,7 @@ def decidir(ext, rec, pag):
             )
             continue
         if classe == "aplicacao":
-            # Skill 1.38.0: 1200 Mais despesa, 30060005, GRAVAR. Nunca ARIADNA.
+            # Skill 1.38.1: 1200 Mais despesa, 30060005, GRAVAR. Nunca ARIADNA.
             out.append(
                 {
                     **linha,
@@ -129,7 +185,16 @@ def decidir(ext, rec, pag):
             )
             continue
         base = rec if classe in ("pix", "cartao") else pag
-        cand = [t for t in base if abs(round(float(t["valor"]), 2) - v) <= 0.02]
+        dia_ln = linha.get("data") or ""
+        cand = [
+            t
+            for t in base
+            if abs(round(float(t["valor"]), 2) - v) <= 0.02
+            and (
+                classe not in ("pix", "cartao")
+                or mesmo_dia_quando_ha(dia_ln, data_tit(t))
+            )
+        ]
         if len(cand) == 1:
             t = cand[0]
             out.append(
@@ -171,7 +236,10 @@ def decidir(ext, rec, pag):
             if cielo_bruto is not None:
                 alvo = round(float(cielo_bruto), 2)
                 tit_bruto = [
-                    t for t in rec if abs(round(float(t["valor"]), 2) - alvo) <= 0.02
+                    t
+                    for t in rec
+                    if abs(round(float(t["valor"]), 2) - alvo) <= 0.02
+                    and mesmo_dia_quando_ha(linha.get("data") or "", data_tit(t))
                 ]
                 if len(tit_bruto) == 1:
                     t = tit_bruto[0]
@@ -201,6 +269,7 @@ def decidir(ext, rec, pag):
                 t
                 for t in rec
                 if 0 < round(float(t["valor"]), 2) - v <= max(1.0, v * 0.05)
+                and mesmo_dia_quando_ha(linha.get("data") or "", data_tit(t))
             ]
             if len(bruto) == 1:
                 t = bruto[0]

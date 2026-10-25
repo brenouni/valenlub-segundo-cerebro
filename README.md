@@ -1,3 +1,3 @@
 # valenlub-segundo-cerebro
 
-Conciliação: skill 1.38.0. Única regra. Tela que fecha tenta de novo.
+Conciliação: skill 1.38.1. Única regra. Tela que fecha tenta de novo.

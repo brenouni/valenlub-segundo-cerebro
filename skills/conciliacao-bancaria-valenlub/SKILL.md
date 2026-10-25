@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
 description: "Conciliação do caixa 4. Anexo sem texto já é o pedido. Tela que fecha não é falta. Tente de novo."
-version: "1.38.0"
+version: "1.38.1"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -12,7 +12,7 @@ metadata:
 
 # Conciliação — ValenLub, caixa 4
 
-Fonte única. Versão 1.38.0. Você não decide. O script decide.
+Fonte única. Versão 1.38.1. Você não decide. O script decide.
 
 Não narrar passo. Não enviar mensagem de progresso. Não diga “Carrego”, “Vou achar”, “O GET veio”, “Rodo a decisão”.
 Só a mensagem final de fechamento (veredito + PDF). Zero narração de passagem.
@@ -25,49 +25,33 @@ Não peça comando. Não pergunte o dia.
 A data é a do arquivo. Outro dia no mesmo arquivo não entra.
 Sem arquivo, pare. Responda sem ser marcado.
 
-## Ordem
+## Ordem (happy path)
 
-1. Uma aba. Feche as outras do Query antes de começar.
-2. Dois GETs. Salve o JSON. `dt_baixa_fim` = dia seguinte.
-3. Monte o extrato do dia: valor, nome inteiro, classe.
-4. Rode `decidir.py`.
-5. Linha `GRAVAR`: clique e faça. Não reclassifique.
-6. Linha `ARIADNA`: não grave. Vai para o PDF, com o nome.
-7. PDF no fim. Responda só com o `mensagem` da tool (veredito de fechamento) + PDF. Nada no meio.
+1. Chegou OFX → chame a tool `conciliar_dia_valenlub` (modo simular ou executar).
+2. Devolva só o campo `mensagem` + caminho do PDF. Zero narração. Zero UI.
+3. Não reimplemente GETs, cliques nem `decidir.py` na tela — a tool faz tudo.
 
-## Tool 1.38.0 (produção)
+## Tool 1.38.1 (produção)
 
 A tool `conciliar_dia_valenlub` é a execução. Não reimplemente na UI o que a tool já faz.
 
 - GET paginado com `dt_baixa_ini` = dia e `dt_baixa_fim` = dia seguinte. Cache em `cache/conciliacao/`.
-- Gate 0/1/N (aplicação 30060005, tarifa 30060001, resgate/rentabilidade 30060006): 0 cria, 1 só liga, ≥2 bloqueia (estorno). Fallback por histórico se plano vazio.
-- Depois de criar, a tool chama `conciliar` para fechar a linha OFX.
-- Cartão / Pix / boleto com id: POST `conciliar` (não stub). Pix já pago sem movimento → `ja_pago_painel`, não cria.
-- PDF/mensagem: `conciliado` = só `gravado`; `falta` inclui stub/bloqueio/erro/ja_*; fechado só se falta=0 e conciliado≥1.
+- Gate 0/1/N (aplicação 30060005, tarifa 30060001, resgate/rentabilidade 30060006): 0 cria, 1 só liga, ≥2 bloqueia (estorno). Data do título obrigatória para casar; fallback valor+dia se plano+hist vazios.
+- Depois de criar, parse do id + `conciliar` com `prefer_hist` (APLIC/TARIFA/RESGATE).
+- Cartão / Pix / boleto com id: POST `conciliar` (não stub). Desdobro (valor linha ≠ título ou acao Desdobre) → `bloqueio_desdobro`, não liga pedaço. Pix já pago sem movimento → `ja_pago_painel`.
+- PDF/mensagem: `conciliado` = só `gravado`; `planejado` = `simulado` (não fecha); `falta` inclui stub/bloqueio/desdobro/erro/ja_*; fechado só se falta=0, planejado=0 e conciliado≥1.
 - Só a mensagem final + PDF. Zero narração de passagem.
 
-## Tela que falha
+## Exceção — tool não fechou
 
-Não é falta. Não é da Ariadna. Breno, 21/10.
-
-Formulário fechou antes do Concluir. Navegador fechou. Aba não abriu. Várias abas. Painel vazio. Busca não carregou.
-
-1. Feche as abas extras. Deixe uma.
-2. Abra de novo a mesma tela.
-3. Preencha de novo. Conclua.
-4. Confira na tela: a linha ficou Conciliado.
-5. Só então passe para a próxima.
-
-Não escreva “Passagem feita” com linha GRAVAR em aberto.
-Não coloque no PDF como falta o que o formulário não gravou.
-Três tentativas. Na quarta, diga o campo que travou e pare só nessa linha.
+Só se a tool devolver `erro`/`stub_noop`/`bloqueio_*` e Breno pedir tela: uma aba, refazer a linha, conferir Conciliado. Não narrar o meio. Não invente UI no happy path.
 
 ## Cartão desdobrado
 
 A Cielo junta. O banco separa.
-Duas linhas do banco somam um título: desdobre. Não é falta.
-Informe os dois valores. A soma tem que bater no centavo. Ligue cada pedaço.
-Linha com título no mesmo valor: só ligue.
+Duas linhas do banco somam um título: a tool marca `bloqueio_desdobro` (não liga pedaço no título inteiro).
+Desdobrar na tela (dois valores, soma no centavo) e só então religar.
+Linha com título no mesmo valor (±0,02): a tool liga.
 Pago no bruto, diferença = taxa: ligue no líquido. Não edite.
 
 ## Lote de boleto
@@ -115,7 +99,8 @@ Histórico (nome/memo) decide a classe. Ordem importa.
 - `RESGATE` / `RESG.` → **resgate** (GRAVAR 1100)
 - `CIELO` / cartão → **cartao**
 - `APLIC.INVEST FACIL` / `APLICACAO` / `APLIC.` / `APLIC ` → **aplicacao** (GRAVAR 1200)
-- Tarifa / boleto / liquidação / PIX → classes próprias
+- Tarifa / boleto / liquidação → classes próprias
+- Pix só se `PIX` no histórico/memo (CREDIT/DEP sozinho ≠ pix)
 
 ## Demais
 
