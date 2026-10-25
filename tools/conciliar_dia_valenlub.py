@@ -474,9 +474,21 @@ def _normalize_titulos(payload: Any) -> list[dict[str, Any]]:
     for t in items:
         if not isinstance(t, dict):
             continue
-        valor = t.get("valor")
-        if valor is None:
-            valor = t.get("vrTitulo") or t.get("valor_titulo") or t.get("vlr") or 0
+        vals = t.get("valores")
+        if not isinstance(vals, dict):
+            r = t.get("raw") if isinstance(t.get("raw"), dict) else {}
+            vals = r.get("valores") if isinstance(r.get("valores"), dict) else {}
+        valor = (
+            t.get("valor")
+            or t.get("vrTitulo")
+            or t.get("valor_titulo")
+            or t.get("vlr")
+            or vals.get("vrCobrancaPagar")
+            or vals.get("vrCobrancaReceber")
+            or vals.get("vrPago")
+            or vals.get("vrBruto")
+            or 0
+        )
         nome = (
             t.get("nome")
             or t.get("cliente")
@@ -488,11 +500,18 @@ def _normalize_titulos(payload: Any) -> list[dict[str, Any]]:
         )
         if isinstance(nome, dict):
             nome = nome.get("nome") or nome.get("razaoSocial") or ""
-        tid = t.get("id") or t.get("idTitulo") or t.get("codigo") or t.get("nrTitulo")
+        tid = (
+            t.get("id")
+            or t.get("idTitulo")
+            or t.get("idCobrancaPagar")
+            or t.get("idCobrancaReceber")
+            or t.get("codigo")
+            or t.get("nrTitulo")
+        )
         out.append(
             {
                 "id": tid,
-                "valor": round(float(str(valor).replace(",", ".")), 2),
+                "valor": _parse_ofx_amount(str(valor)),
                 "nome": str(nome or ""),
                 "raw": t,
             }
