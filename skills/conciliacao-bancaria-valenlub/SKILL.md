@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
 description: "Conciliação do caixa 4. Anexo sem texto já é o pedido. Tela que fecha não é falta. Tente de novo."
-version: "1.37.0"
+version: "1.38.0"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -12,7 +12,7 @@ metadata:
 
 # Conciliação — ValenLub, caixa 4
 
-Fonte única. Versão 1.37.0. Você não decide. O script decide.
+Fonte única. Versão 1.38.0. Você não decide. O script decide.
 
 Não narrar passo. Não enviar mensagem de progresso. Não diga “Carrego”, “Vou achar”, “O GET veio”, “Rodo a decisão”.
 Só a mensagem final de fechamento (veredito + PDF). Zero narração de passagem.
@@ -34,6 +34,17 @@ Sem arquivo, pare. Responda sem ser marcado.
 5. Linha `GRAVAR`: clique e faça. Não reclassifique.
 6. Linha `ARIADNA`: não grave. Vai para o PDF, com o nome.
 7. PDF no fim. Responda só com o `mensagem` da tool (veredito de fechamento) + PDF. Nada no meio.
+
+## Tool 1.38.0 (produção)
+
+A tool `conciliar_dia_valenlub` é a execução. Não reimplemente na UI o que a tool já faz.
+
+- GET paginado com `dt_baixa_ini` = dia e `dt_baixa_fim` = dia seguinte. Cache em `cache/conciliacao/`.
+- Gate 0/1/N (aplicação 30060005, tarifa 30060001, resgate/rentabilidade 30060006): 0 cria, 1 só liga, ≥2 bloqueia (estorno). Fallback por histórico se plano vazio.
+- Depois de criar, a tool chama `conciliar` para fechar a linha OFX.
+- Cartão / Pix / boleto com id: POST `conciliar` (não stub). Pix já pago sem movimento → `ja_pago_painel`, não cria.
+- PDF/mensagem: `conciliado` = só `gravado`; `falta` inclui stub/bloqueio/erro/ja_*; fechado só se falta=0 e conciliado≥1.
+- Só a mensagem final + PDF. Zero narração de passagem.
 
 ## Tela que falha
 

@@ -1,6 +1,6 @@
 name: conciliar-dia-valenlub
 version: 1.0.0
-description: Conciliação do caixa 4 ValenLub (skill 1.37.0) — OFX + Query + PDF
+description: Conciliação do caixa 4 ValenLub (skill 1.38.0) — OFX + Query + PDF
 author: Breno Alencar
 license: Proprietary
 tags: [ValenLub, Conciliacao, Query]

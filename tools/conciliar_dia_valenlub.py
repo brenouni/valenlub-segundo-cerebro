@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conciliação do caixa 4 ValenLub — skill 1.37.0.
+"""Conciliação do caixa 4 ValenLub — skill 1.38.0.
 
 Função principal: conciliar_dia_valenlub(...)
 
@@ -165,12 +165,17 @@ def _classify_line(nome: str, memo: str = "", trntype: str = "") -> str:
             "GETNET",
             "SAFRAPAY",
             "CARTAO",
-            "CREDITO",
             "DEBITO VISA",
             "DEBITO MASTER",
             "VISA ELECTRON",
             "MASTERCARD",
             "ELO ",
+            "AMEX",
+            "AMERICAN EXPRESS",
+            "CREDITO VISA",
+            "CREDITO MASTER",
+            "CREDITO ELO",
+            "CREDITO AMEX",
         )
     ):
         return "cartao"
@@ -255,17 +260,26 @@ def ler_ofx(ofx_path: str, data: str) -> list[dict[str, Any]]:
         dia = _parse_ofx_date(campos.get("DTPOSTED") or campos.get("DTUSER") or "")
         if dia != data:
             continue
-        valor = abs(_parse_ofx_amount(campos.get("TRNAMT") or "0"))
+        valor_signed = _parse_ofx_amount(campos.get("TRNAMT") or "0")
+        valor = abs(valor_signed)
         nome = (campos.get("NAME") or campos.get("PAYEE") or "").strip()
         memo = (campos.get("MEMO") or "").strip()
         if not nome and memo:
             nome = memo
         trntype = (campos.get("TRNTYPE") or "").strip()
         classe = _classify_line(nome, memo, trntype)
+        if valor_signed < 0 or trntype.upper() in ("DEBIT", "XFER", "PAYMENT", "POS", "ATM"):
+            sentido = "saida"
+        elif valor_signed > 0 or trntype.upper() in ("CREDIT", "DEP", "DIRECTDEP"):
+            sentido = "entrada"
+        else:
+            sentido = "entrada"
         linhas.append(
             {
                 "data": dia,
                 "valor": valor,
+                "valor_signed": valor_signed,
+                "sentido": sentido,
                 "nome": nome,
                 "memo": memo,
                 "classe": classe,
@@ -452,24 +466,72 @@ def query_login(base: str, user: str, password: str, tenant: str) -> str:
     raise RuntimeError("Falha no POST /login Query. Confira QUERY_USER/QUERY_PASS/QUERY_TENANT.")
 
 
-def _normalize_titulos(payload: Any) -> list[dict[str, Any]]:
+def _extract_items(payload: Any) -> list:
     if payload is None:
         return []
     if isinstance(payload, list):
-        items = payload
-    elif isinstance(payload, dict):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+    items = (
+        payload.get("data")
+        or payload.get("items")
+        or payload.get("content")
+        or payload.get("result")
+        or payload.get("results")
+        or payload.get("titulos")
+        or payload.get("cobrancas")
+        or []
+    )
+    if isinstance(items, dict):
         items = (
-            payload.get("data")
-            or payload.get("items")
-            or payload.get("content")
-            or payload.get("result")
-            or payload.get("results")
+            items.get("items")
+            or items.get("data")
+            or items.get("content")
+            or items.get("results")
             or []
         )
-        if isinstance(items, dict):
-            items = items.get("items") or items.get("data") or []
-    else:
-        return []
+    return items if isinstance(items, list) else []
+
+
+def _payload_total(payload: Any, n_items: int) -> int | None:
+    if not isinstance(payload, dict):
+        return None
+    for k in ("total", "totalElements", "total_count", "count", "totalRecords"):
+        v = payload.get(k)
+        if isinstance(v, (int, float)) and int(v) >= n_items:
+            return int(v)
+    meta = payload.get("meta") or payload.get("pagination") or payload.get("page") or {}
+    if isinstance(meta, dict):
+        for k in ("total", "totalElements", "total_count", "count"):
+            v = meta.get(k)
+            if isinstance(v, (int, float)) and int(v) >= n_items:
+                return int(v)
+    return None
+
+
+def _payload_next_cursor(payload: Any) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    for k in ("next_cursor", "nextCursor", "cursor", "next"):
+        v = payload.get(k)
+        if isinstance(v, str) and v.strip() and v not in ("null", "None"):
+            return v.strip()
+    meta = payload.get("meta") or payload.get("pagination") or {}
+    if isinstance(meta, dict):
+        for k in ("next_cursor", "nextCursor", "cursor", "next"):
+            v = meta.get(k)
+            if isinstance(v, str) and v.strip() and v not in ("null", "None"):
+                return v.strip()
+    links = payload.get("links") if isinstance(payload.get("links"), dict) else {}
+    nxt = links.get("next")
+    if isinstance(nxt, str) and nxt.strip():
+        return nxt.strip()
+    return None
+
+
+def _normalize_titulos(payload: Any) -> list[dict[str, Any]]:
+    items = _extract_items(payload)
     out: list[dict[str, Any]] = []
     for t in items:
         if not isinstance(t, dict):
@@ -478,6 +540,8 @@ def _normalize_titulos(payload: Any) -> list[dict[str, Any]]:
         if not isinstance(vals, dict):
             r = t.get("raw") if isinstance(t.get("raw"), dict) else {}
             vals = r.get("valores") if isinstance(r.get("valores"), dict) else {}
+        if not isinstance(vals, dict):
+            vals = {}
         valor = (
             t.get("valor")
             or t.get("vrTitulo")
@@ -489,17 +553,35 @@ def _normalize_titulos(payload: Any) -> list[dict[str, Any]]:
             or vals.get("vrBruto")
             or 0
         )
+        pessoa = t.get("pessoa")
+        if not isinstance(pessoa, dict):
+            r = t.get("raw") if isinstance(t.get("raw"), dict) else {}
+            pessoa = r.get("pessoa") if isinstance(r.get("pessoa"), dict) else {}
+        if not isinstance(pessoa, dict):
+            pessoa = {}
         nome = (
             t.get("nome")
+            or t.get("nmPessoa")
+            or t.get("nmCliente")
             or t.get("cliente")
             or t.get("fornecedor")
             or t.get("nomeCliente")
             or t.get("razaoSocial")
+            or pessoa.get("nmPessoa")
+            or pessoa.get("nome")
+            or pessoa.get("razaoSocial")
+            or pessoa.get("nmCliente")
             or t.get("pessoa")
             or ""
         )
         if isinstance(nome, dict):
-            nome = nome.get("nome") or nome.get("razaoSocial") or ""
+            nome = (
+                nome.get("nmPessoa")
+                or nome.get("nome")
+                or nome.get("razaoSocial")
+                or nome.get("nmCliente")
+                or ""
+            )
         tid = (
             t.get("id")
             or t.get("idTitulo")
@@ -526,24 +608,109 @@ def query_get_titulos(
     endpoint: str,
     dt_baixa_fim: str,
     caixa: int | None = None,
-) -> list[dict[str, Any]]:
+    dt_baixa_ini: str | None = None,
+    *,
+    return_raw: bool = False,
+) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], Any]:
+    """GET títulos com janela de baixa e paginação defensiva."""
     params: dict[str, Any] = {"dt_baixa_fim": dt_baixa_fim}
+    if dt_baixa_ini:
+        params["dt_baixa_ini"] = dt_baixa_ini
+        params["dtBaixaIni"] = dt_baixa_ini
+        params["dt_baixa_inicio"] = dt_baixa_ini
+    params["dtBaixaFim"] = dt_baixa_fim
     if caixa is not None:
         params["caixa"] = caixa
         params["id_caixa"] = caixa
-    url = f"{base.rstrip('/')}/{endpoint.lstrip('/')}?{urlencode(params)}"
-    try:
-        payload = _http_json("GET", url, headers=_query_headers(token, tenant))
-        return _normalize_titulos(payload)
-    except HTTPError as e:
-        # tenta sem caixa se 400/404
-        if e.code in (400, 404, 422) and "caixa" in params:
-            params.pop("caixa", None)
-            params.pop("id_caixa", None)
-            url = f"{base.rstrip('/')}/{endpoint.lstrip('/')}?{urlencode(params)}"
-            payload = _http_json("GET", url, headers=_query_headers(token, tenant))
-            return _normalize_titulos(payload)
-        raise
+        params["idCaixa"] = caixa
+
+    def _fetch(p: dict[str, Any]) -> Any:
+        url = f"{base.rstrip('/')}/{endpoint.lstrip('/')}?{urlencode(p)}"
+        try:
+            return _http_json("GET", url, headers=_query_headers(token, tenant))
+        except HTTPError as e:
+            if e.code in (400, 404, 422) and any(
+                k in p for k in ("caixa", "id_caixa", "idCaixa")
+            ):
+                p2 = dict(p)
+                for k in ("caixa", "id_caixa", "idCaixa"):
+                    p2.pop(k, None)
+                url = f"{base.rstrip('/')}/{endpoint.lstrip('/')}?{urlencode(p2)}"
+                return _http_json("GET", url, headers=_query_headers(token, tenant))
+            raise
+
+    all_norm: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    raw_pages: list[Any] = []
+    page = 1
+    cursor: str | None = None
+    offset = 0
+    page_size = 100
+    max_pages = 50
+    last_payload: Any = None
+
+    while page <= max_pages:
+        p = dict(params)
+        p["page"] = page
+        p["pagina"] = page
+        p["pageSize"] = page_size
+        p["per_page"] = page_size
+        p["limit"] = page_size
+        p["size"] = page_size
+        p["offset"] = offset
+        if cursor:
+            p["cursor"] = cursor
+            p["next_cursor"] = cursor
+        payload = _fetch(p)
+        last_payload = payload
+        raw_pages.append(payload)
+        batch = _normalize_titulos(payload)
+        if not batch:
+            # primeira página sem page params (API que rejeita paginação)
+            if page == 1 and not cursor and offset == 0:
+                p0 = dict(params)
+                try:
+                    payload0 = _fetch(p0)
+                    last_payload = payload0
+                    raw_pages = [payload0]
+                    batch = _normalize_titulos(payload0)
+                except Exception:
+                    batch = []
+            if not batch:
+                break
+        new_count = 0
+        for t in batch:
+            tid = str(t.get("id") or "")
+            key = tid or f"{t.get('valor')}|{t.get('nome')}|{len(all_norm)}"
+            if key in seen_ids:
+                continue
+            seen_ids.add(key)
+            all_norm.append(t)
+            new_count += 1
+        total = _payload_total(payload, len(batch))
+        nxt = _payload_next_cursor(payload)
+        if nxt and nxt != cursor:
+            cursor = nxt
+            page += 1
+            offset += page_size
+            continue
+        if total is not None and len(all_norm) < total and new_count > 0:
+            page += 1
+            offset += page_size
+            continue
+        if new_count >= page_size:
+            # página cheia — tenta mais
+            page += 1
+            offset += page_size
+            continue
+        break
+
+    raw_out: Any = last_payload
+    if len(raw_pages) > 1:
+        raw_out = {"pages": raw_pages, "total_normalizados": len(all_norm)}
+    if return_raw:
+        return all_norm, raw_out
+    return all_norm
 
 
 def _query_creds_missing() -> list[str]:
@@ -571,11 +738,33 @@ def _query_creds_missing() -> list[str]:
     return missing
 
 
-def carregar_query(data: str, caixa: int) -> tuple[list[dict], list[dict], list[str]]:
+def _cache_dir() -> Path:
+    d = ROOT / "cache" / "conciliacao"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _dump_json(path: Path, obj: Any) -> None:
+    try:
+        path.write_text(
+            json.dumps(obj, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def carregar_query(
+    data: str,
+    caixa: int,
+    *,
+    dump_prefix: str | None = None,
+) -> tuple[list[dict], list[dict], list[str]]:
     """GETs read-only. Retorna (receber, pagar, avisos).
 
     Exige QUERY_TENANT e (QUERY_TOKEN ou QUERY_USER+QUERY_PASS).
     Não pula GET em silêncio — chame _query_creds_missing() antes.
+    Pagina até esgotar. dt_baixa_ini = data do dia; dt_baixa_fim = dia seguinte.
     """
     _ensure_env()
     avisos: list[str] = []
@@ -597,17 +786,32 @@ def carregar_query(data: str, caixa: int) -> tuple[list[dict], list[dict], list[
             token = query_login(base, user, password, tenant)
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"Login Query falhou: {exc}") from exc
+    dt_ini = data
     dt_fim = (datetime.strptime(data, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
     receber: list[dict] = []
     pagar: list[dict] = []
+    receber_raw: Any = None
+    pagar_raw: Any = None
     try:
-        receber = query_get_titulos(base, token, tenant, "contas-receber", dt_fim, caixa)
+        receber, receber_raw = query_get_titulos(
+            base, token, tenant, "contas-receber", dt_fim, caixa,
+            dt_baixa_ini=dt_ini, return_raw=True,
+        )
     except Exception as exc:  # noqa: BLE001
         avisos.append(f"GET contas-receber falhou: {exc}")
     try:
-        pagar = query_get_titulos(base, token, tenant, "contas-a-pagar", dt_fim, caixa)
+        pagar, pagar_raw = query_get_titulos(
+            base, token, tenant, "contas-a-pagar", dt_fim, caixa,
+            dt_baixa_ini=dt_ini, return_raw=True,
+        )
     except Exception as exc:  # noqa: BLE001
         avisos.append(f"GET contas-a-pagar falhou: {exc}")
+    if dump_prefix:
+        cdir = _cache_dir()
+        _dump_json(cdir / f"{dump_prefix}-receber-raw.json", receber_raw)
+        _dump_json(cdir / f"{dump_prefix}-pagar-raw.json", pagar_raw)
+        _dump_json(cdir / f"{dump_prefix}-receber.json", receber)
+        _dump_json(cdir / f"{dump_prefix}-pagar.json", pagar)
     return receber, pagar, avisos
 
 
@@ -749,8 +953,9 @@ def query_criar_consumo_snf(
     data_extrato: str,
     ds_historico: str,
     id_plano: str,
+    id_caixa: str | int | None = None,
 ) -> str:
-    """POST multipart criar.consumo.snf — despesa + baixa caixa 4 (captura 1200)."""
+    """POST multipart criar.consumo.snf — despesa + baixa no caixa (captura 1200)."""
     data_br = _data_br(data_extrato)
     vr = f"{abs(float(valor)):.2f}"
     fields = {
@@ -762,7 +967,7 @@ def query_criar_consumo_snf(
         "fields[Financeiro_Cobrancas_Pagar][Financeiro_Cobrancas_Pagar_Tipos_id]": _TIPO_PAGAR_DINHEIRO,
         "fields[Financeiro_Cobrancas_Pagar][idFilial]": _ID_FILIAL,
         "fields[Financeiro_Cobrancas_Pagar][idPlanoDeContasSubconta]": id_plano,
-        "fields[Financeiro_Cobrancas_Pagar][idCaixaBaixa]": _ID_CAIXA,
+        "fields[Financeiro_Cobrancas_Pagar][idCaixaBaixa]": str(id_caixa or _ID_CAIXA),
         "fields[Financeiro_Cobrancas_Pagar][dtCobrancaPagarBaixa]": data_br,
         "fields[Financeiro_Cobrancas_Pagar][idAssistente]": _ID_ASSISTENTE_PAGAR,
     }
@@ -856,11 +1061,12 @@ def query_baixar_receber(
     valor: float,
     data_extrato: str,
     ds_historico: str = "",
+    id_caixa: str | int | None = None,
 ) -> str:
-    """POST receber_transaction — Receber Pagamento (juros/multa 0, caixa 4).
+    """POST receber_transaction — Receber Pagamento (juros/multa 0, caixa).
 
     Captura Concluir: exige dsHistorico/idHistorico ("Informe um histórico").
-    nmCaixa* é dinâmico; idCaixa=4 basta.
+    nmCaixa* é dinâmico; idCaixa basta.
     """
     data_br = _data_br(data_extrato)
     vr = f"{abs(float(valor)):.2f}"
@@ -876,7 +1082,7 @@ def query_baixar_receber(
         "fields[Financeiro_CreditosDeClientes][Financeiro_CreditosDeClientes_valor]": "",
         "fields[Financeiro_Cobrancas_Receber][vrTaxas]": "0.00",
         "fields[Financeiro_Cobrancas_Receber][vrCobrancaReceber]": vr,
-        "fields[Financeiro_Cobrancas_Receber][idCaixa]": _ID_CAIXA,
+        "fields[Financeiro_Cobrancas_Receber][idCaixa]": str(id_caixa or _ID_CAIXA),
         "fields[Financeiro_Cobrancas_Receber][idMoeda]": _RECEITA_ID_MOEDA,
         "fields[Financeiro_Cobrancas_Receber][cdMoeda]": _RECEITA_CD_MOEDA,
         "fields[Financeiro_Cobrancas_Receber][dtCobrancaReceberRecebimento]": data_br,
@@ -907,6 +1113,7 @@ def _gravar_despesa_snf(
     *,
     ds_historico: str,
     id_plano: str,
+    id_caixa: str | int | None = None,
 ) -> dict:
     resp = query_criar_consumo_snf(
         opener,
@@ -914,6 +1121,7 @@ def _gravar_despesa_snf(
         data_extrato=_data_linha(ln),
         ds_historico=ds_historico,
         id_plano=id_plano,
+        id_caixa=id_caixa,
     )
     ok = "[Sucesso]" in resp
     item["status"] = "gravado" if ok else "erro"
@@ -926,6 +1134,11 @@ def _gravar_despesa_snf(
     item["resposta"] = (resp or "")[:300]
     if not ok:
         item["motivo"] = "Resposta sem [Sucesso]."
+        return item
+    # Fecha a linha OFX na 1311 após criar+baixar
+    item = _ligar_extrato_apos_criar(
+        opener, item, ln, id_caixa=id_caixa, tp="Debito"
+    )
     return item
 
 
@@ -935,8 +1148,9 @@ def _gravar_receita_e_baixa(
     ln: dict,
     *,
     ds_historico: str,
+    id_caixa: str | int | None = None,
 ) -> tuple[dict, dict | None]:
-    """criar.novo → parse id → receber_transaction. Retorna (item, criado?)."""
+    """criar.novo → parse id → receber_transaction → conciliar OFX. Retorna (item, criado?)."""
     valor = float(ln.get("valor") or 0)
     data_ex = _data_linha(ln)
     resp_cria = query_criar_receita_avulsa(
@@ -970,6 +1184,7 @@ def _gravar_receita_e_baixa(
         valor=valor,
         data_extrato=data_ex,
         ds_historico=ds_historico,
+        id_caixa=id_caixa,
     )
     ok = "[Sucesso]" in (resp_baixa or "")
     item["status"] = "gravado" if ok else "erro"
@@ -979,8 +1194,14 @@ def _gravar_receita_e_baixa(
     item["resposta"] = (resp_baixa or "")[:300]
     if not ok:
         item["motivo"] = "Baixa sem [Sucesso] (título pode ter nascido Aberto)."
+        criado["status"] = "criado"
+        criado["baixado"] = False
+        return item, criado
     criado["status"] = "criado"
-    criado["baixado"] = ok
+    criado["baixado"] = True
+    item = _ligar_extrato_apos_criar(
+        opener, item, ln, id_caixa=id_caixa, tp="Credito", id_titulo=id_cob
+    )
     return item, criado
 
 
@@ -1142,12 +1363,253 @@ def _eh_cartao_mov(m: dict) -> bool:
     return bool(_CARTAO_RE.search(blob))
 
 
-def _gravar_liquidacao(opener: Any, item: dict, ln: dict) -> dict:
+
+def _caixa_str(id_caixa: str | int | None = None) -> str:
+    return str(id_caixa if id_caixa is not None else _ID_CAIXA)
+
+
+def _achar_extrato_por_valor(
+    opener: Any,
+    *,
+    id_caixa: str,
+    data_extrato: str,
+    valor: float,
+    prefer_hist: tuple[str, ...] = (),
+) -> dict | None:
+    txs = query_extrato_pendente(opener, id_caixa=id_caixa, data_extrato=data_extrato)
+    cand: list[dict] = []
+    for t in txs:
+        try:
+            vr = abs(float(t.get("vr") or t.get("valor") or 0))
+        except (TypeError, ValueError):
+            continue
+        if abs(vr - abs(float(valor))) > 0.02:
+            continue
+        cand.append(t)
+    if not cand:
+        return None
+    if prefer_hist:
+        pref = [
+            t
+            for t in cand
+            if any(
+                k in str(t.get("hist") or t.get("dsHistorico") or "").upper()
+                for k in prefer_hist
+            )
+        ]
+        if pref:
+            return pref[0]
+    return cand[0]
+
+
+def _parse_conciliar_ok(resp: str, item: dict) -> bool:
+    ok = False
+    try:
+        js = json.loads(resp)
+        ok = bool(js.get("isOk")) or "sucesso" in str(js.get("message") or "").lower()
+        item["resposta"] = json.dumps(js, ensure_ascii=False)[:300]
+        item["vinculadas"] = js.get("vinculadas")
+    except json.JSONDecodeError:
+        ok = "[Sucesso]" in resp or "sucesso" in (resp or "").lower()
+        item["resposta"] = (resp or "")[:300]
+    return ok
+
+
+def _achar_mov_ids(
+    opener: Any,
+    *,
+    id_caixa: str,
+    data_extrato: str,
+    valor: float,
+    tp: str,
+    id_titulo: str | None = None,
+    excluir_cartao: bool = False,
+    prefer_mesmo_dia: bool = True,
+) -> list[str] | None:
+    movs = query_movimentacoes_para_alvo(
+        opener, id_caixa=id_caixa, data_extrato=data_extrato, valor=valor, tp=tp
+    )
+    dia_br = _data_br(data_extrato)
+    pool: list[tuple[str, float, str]] = []
+    for m in movs:
+        if excluir_cartao and _eh_cartao_mov(m):
+            continue
+        mid = m.get("idMovimentacao") or m.get("id")
+        if mid is None:
+            continue
+        try:
+            vr = abs(float(m.get("vr") or m.get("valor") or 0))
+        except (TypeError, ValueError):
+            continue
+        if vr <= 0:
+            continue
+        blob = " ".join(str(m.get(k) or "") for k in m)
+        if id_titulo and str(id_titulo) in blob and abs(vr - abs(float(valor))) <= 0.02:
+            return [str(mid)]
+        dt = str(m.get("data") or m.get("dt") or "")
+        pool.append((str(mid), vr, dt))
+    if id_titulo:
+        exact = [(i, v, d) for (i, v, d) in pool if abs(v - abs(float(valor))) <= 0.02]
+        if prefer_mesmo_dia:
+            mesmo = [
+                (i, v)
+                for (i, v, dt) in exact
+                if dia_br in dt or dt.replace("-", "/") == dia_br or dt[:10] == data_extrato[:10]
+            ]
+            if len(mesmo) == 1:
+                return [mesmo[0][0]]
+        if len(exact) == 1:
+            return [exact[0][0]]
+    mesmo_dia = [
+        (i, v)
+        for (i, v, dt) in pool
+        if dia_br in dt or dt.replace("-", "/") == dia_br or dt[:10] == data_extrato[:10]
+    ]
+    use = mesmo_dia if (prefer_mesmo_dia and mesmo_dia) else [(i, v) for (i, v, _) in pool]
+    return _subset_sum_ids(use, valor)
+
+
+def _ligar_extrato_apos_criar(
+    opener: Any,
+    item: dict,
+    ln: dict,
+    *,
+    id_caixa: str | int | None = None,
+    tp: str = "Debito",
+    id_titulo: str | None = None,
+    prefer_hist: tuple[str, ...] = (),
+) -> dict:
+    """Após criar+baixar: POST conciliar para fechar a linha OFX."""
+    cx = _caixa_str(id_caixa)
+    data_ex = _data_linha(ln)
+    valor = abs(float(ln.get("valor") or 0))
+    tx = _achar_extrato_por_valor(
+        opener, id_caixa=cx, data_extrato=data_ex, valor=valor, prefer_hist=prefer_hist
+    )
+    if not tx:
+        item["ligacao"] = "pendente_extrato"
+        item["status"] = "ja_existe_ligar"
+        item["gravou"] = False
+        item["motivo"] = (
+            (item.get("motivo") or "")
+            + f" Título criado; extrato pendente não achado (caixa {cx}, {valor:.2f})."
+        ).strip()
+        return item
+    id_extrato = str(tx.get("id") or tx.get("Financeiro_Caixas_Extratos_id") or "")
+    if not id_extrato:
+        item["ligacao"] = "pendente_extrato"
+        item["status"] = "ja_existe_ligar"
+        item["gravou"] = False
+        return item
+    ids = _achar_mov_ids(
+        opener,
+        id_caixa=cx,
+        data_extrato=data_ex,
+        valor=valor,
+        tp=tp,
+        id_titulo=id_titulo or str(item.get("id_cobranca") or item.get("id_titulo") or "") or None,
+    )
+    if not ids:
+        item["ligacao"] = "pendente_mov"
+        item["id_extrato"] = id_extrato
+        item["status"] = "ja_existe_ligar"
+        item["gravou"] = False
+        item["motivo"] = (
+            (item.get("motivo") or "")
+            + f" Extrato {id_extrato} achado; sem movimentação para conciliar."
+        ).strip()
+        return item
+    resp = query_conciliar_lote(opener, id_extrato=id_extrato, ids_movimentacao=ids)
+    ok = _parse_conciliar_ok(resp, item)
+    item["id_extrato"] = id_extrato
+    item["ids_movimentacao"] = ids
+    item["ligacao"] = "ok" if ok else "falhou"
+    if ok:
+        item["status"] = "gravado"
+        item["gravou"] = True
+    else:
+        item["status"] = "ja_existe_ligar"
+        item["gravou"] = False
+        item["motivo"] = (
+            (item.get("motivo") or "") + " Conciliação OFX sem isOk."
+        ).strip()
+    return item
+
+
+def _ligar_titulo_na_linha(
+    opener: Any,
+    item: dict,
+    ln: dict,
+    *,
+    id_caixa: str | int | None = None,
+    id_titulo: str | None = None,
+    tp: str = "Credito",
+    prefer_hist: tuple[str, ...] = (),
+    excluir_cartao: bool = False,
+) -> dict:
+    """POST conciliar extrato↔movimentação para cartão/pix/boleto com título."""
+    cx = _caixa_str(id_caixa)
+    data_ex = _data_linha(ln)
+    valor = abs(float(ln.get("valor") or 0))
+    tx = _achar_extrato_por_valor(
+        opener, id_caixa=cx, data_extrato=data_ex, valor=valor, prefer_hist=prefer_hist
+    )
+    if not tx:
+        item["status"] = "erro"
+        item["gravou"] = False
+        item["motivo"] = (
+            f"Extrato pendente não encontrado (caixa {cx}, data {data_ex}, valor {valor:.2f})."
+        )
+        return item
+    id_extrato = str(tx.get("id") or tx.get("Financeiro_Caixas_Extratos_id") or "")
+    if not id_extrato:
+        item["status"] = "erro"
+        item["gravou"] = False
+        item["motivo"] = "Linha de extrato sem id."
+        return item
+    ids = _achar_mov_ids(
+        opener,
+        id_caixa=cx,
+        data_extrato=data_ex,
+        valor=valor,
+        tp=tp,
+        id_titulo=id_titulo,
+        excluir_cartao=excluir_cartao,
+    )
+    if not ids:
+        item["status"] = "erro"
+        item["gravou"] = False
+        item["id_extrato"] = id_extrato
+        item["id_titulo"] = id_titulo
+        item["motivo"] = (
+            f"Sem movimentação para título {id_titulo} / valor {valor:.2f} "
+            f"(extrato {id_extrato})."
+        )
+        return item
+    resp = query_conciliar_lote(opener, id_extrato=id_extrato, ids_movimentacao=ids)
+    ok = _parse_conciliar_ok(resp, item)
+    item["status"] = "gravado" if ok else "erro"
+    item["gravou"] = ok
+    item["endpoint"] = (
+        "/mgerencia/scripts/financeiro/conciliacao/actions&id=conciliar"
+    )
+    item["id_extrato"] = id_extrato
+    item["ids_movimentacao"] = ids
+    item["id_titulo"] = id_titulo
+    if not ok:
+        item["motivo"] = "Conciliação sem isOk."
+    return item
+
+
+def _gravar_liquidacao(
+    opener: Any, item: dict, ln: dict, *, id_caixa: str | int | None = None
+) -> dict:
     """Lote de boleto: achar linha OFX + movimentações do dia (sem cartão) e conciliar."""
+    cx = _caixa_str(id_caixa)
     data_ex = _data_linha(ln)
     valor = abs(float(ln.get("valor") or 0))
     nome = (ln.get("nome") or ln.get("memo") or "").upper()
-    txs = query_extrato_pendente(opener, id_caixa=_ID_CAIXA, data_extrato=data_ex)
+    txs = query_extrato_pendente(opener, id_caixa=cx, data_extrato=data_ex)
     # casa por valor ±0,02 e histórico LIQUID* se houver
     cand = []
     for t in txs:
@@ -1169,7 +1631,7 @@ def _gravar_liquidacao(opener: Any, item: dict, ln: dict) -> dict:
         item["status"] = "erro"
         item["gravou"] = False
         item["motivo"] = (
-            f"Extrato pendente não encontrado (caixa {_ID_CAIXA}, "
+            f"Extrato pendente não encontrado (caixa {cx}, "
             f"data {data_ex}, valor {valor:.2f})."
         )
         return item
@@ -1181,7 +1643,7 @@ def _gravar_liquidacao(opener: Any, item: dict, ln: dict) -> dict:
         return item
 
     movs = query_movimentacoes_para_alvo(
-        opener, id_caixa=_ID_CAIXA, data_extrato=data_ex, valor=valor, tp="Credito"
+        opener, id_caixa=cx, data_extrato=data_ex, valor=valor, tp="Credito"
     )
     # skill: recebimentos do dia; desmarque cartão
     dia_br = _data_br(data_ex)  # DD/MM/YYYY
@@ -1269,20 +1731,29 @@ def _plano_do_titulo(t: dict) -> str:
                 if nested.get(k) is not None and str(nested.get(k)).strip():
                     return str(nested.get(k)).strip()
     blob = " ".join(str(v) for v in (raw or {}).values() if v is not None)
-    if _APLICACAO_ID_PLANO in blob:
-        return _APLICACAO_ID_PLANO
+    for pid in (_APLICACAO_ID_PLANO, _TARIFA_ID_PLANO, _RECEITA_ID_PLANO):
+        if pid in blob:
+            return pid
     return ""
 
 
 def _data_do_titulo(t: dict) -> str:
-    """Data do título (baixa/vencimento/pagamento) se houver."""
+    """Data do título (baixa/vencimento/pagamento), incl. datas.* aninhado."""
     raw = t.get("raw") if isinstance(t.get("raw"), dict) else {}
+    datas_list: list[dict] = []
     for src in (raw, t):
+        if isinstance(src, dict) and isinstance(src.get("datas"), dict):
+            datas_list.append(src["datas"])
+    for src in (*datas_list, raw, t):
         if not isinstance(src, dict):
             continue
         for k in (
             "dtBaixa",
             "dt_baixa",
+            "dtCobrancaPagarBaixa",
+            "dtCobrancaReceberRecebimento",
+            "dtVencimentoCobrancaPagar",
+            "dtVencimentoCobrancaReceber",
             "dtVencimento",
             "dt_vencimento",
             "dtPagamento",
@@ -1322,22 +1793,76 @@ def _mesmo_dia_titulo(dia_linha: str, dia_tit: str) -> bool:
     return bool(parts(dl) & parts(dt))
 
 
-def _candidatos_aplicacao(pagar: list[dict] | None, valor: float, dia: str) -> list[dict]:
-    """Títulos 30060005 no mesmo valor (±0,02); filtra dia quando raw tem data."""
+def _historico_do_titulo(t: dict) -> str:
+    raw = t.get("raw") if isinstance(t.get("raw"), dict) else {}
+    parts: list[str] = []
+    for src in (raw, t):
+        if not isinstance(src, dict):
+            continue
+        for k in (
+            "dsHistorico",
+            "historico",
+            "hist",
+            "descricao",
+            "ds_historico",
+            "nmHistorico",
+        ):
+            v = src.get(k)
+            if v is not None and str(v).strip():
+                parts.append(str(v))
+    return " ".join(parts).upper()
+
+
+def _candidatos_plano(
+    titulos: list[dict] | None,
+    valor: float,
+    dia: str,
+    id_plano: str,
+    hist_keywords: tuple[str, ...] = (),
+) -> list[dict]:
+    """Gate 0/1/N: valor±0,02 + (plano OU histórico) + mesmo dia."""
     out: list[dict] = []
-    for t in pagar or []:
+    alvo = abs(float(valor))
+    kws = tuple(k.upper() for k in hist_keywords if k)
+    for t in titulos or []:
         try:
             tv = abs(float(t.get("valor") or 0))
         except (TypeError, ValueError):
             continue
-        if abs(tv - abs(float(valor))) > 0.02:
-            continue
-        if _plano_do_titulo(t) != _APLICACAO_ID_PLANO:
+        if abs(tv - alvo) > 0.02:
             continue
         if not _mesmo_dia_titulo(dia, _data_do_titulo(t)):
             continue
-        out.append(t)
+        plano = _plano_do_titulo(t)
+        if plano == id_plano:
+            out.append(t)
+            continue
+        if not plano and kws:
+            hist = _historico_do_titulo(t)
+            if any(k in hist for k in kws):
+                out.append(t)
     return out
+
+
+def _candidatos_aplicacao(pagar: list[dict] | None, valor: float, dia: str) -> list[dict]:
+    """Títulos 30060005 no mesmo valor (±0,02); fallback por histórico aplicação."""
+    return _candidatos_plano(
+        pagar, valor, dia, _APLICACAO_ID_PLANO, ("APLICACAO", "APLIC.", "APLIC ")
+    )
+
+
+def _candidatos_tarifa(pagar: list[dict] | None, valor: float, dia: str) -> list[dict]:
+    return _candidatos_plano(
+        pagar, valor, dia, _TARIFA_ID_PLANO, ("TARIFA", "TX ", "TAXA")
+    )
+
+
+def _candidatos_receita(receber: list[dict] | None, valor: float, dia: str, classe: str) -> list[dict]:
+    if classe == "resgate":
+        kws = ("RESGATE", "RESG.", "RESG ")
+    else:
+        kws = ("RENTAB", "RENTABILIDADE", "RENDIMENTO", "RENDTO")
+    return _candidatos_plano(receber, valor, dia, _RECEITA_ID_PLANO, kws)
 
 
 def _id_mov_do_titulo(t: dict) -> str | None:
@@ -1360,11 +1885,14 @@ def _id_mov_do_titulo(t: dict) -> str | None:
     return None
 
 
-def _ligar_aplicacao(opener: Any, item: dict, ln: dict, titulo: dict) -> dict:
+def _ligar_aplicacao(
+    opener: Any, item: dict, ln: dict, titulo: dict, *, id_caixa: str | int | None = None
+) -> dict:
     """Liga extrato ↔ movimentação do título 30060005 único (não cria)."""
+    cx = _caixa_str(id_caixa)
     data_ex = _data_linha(ln)
     valor = abs(float(ln.get("valor") or 0))
-    txs = query_extrato_pendente(opener, id_caixa=_ID_CAIXA, data_extrato=data_ex)
+    txs = query_extrato_pendente(opener, id_caixa=cx, data_extrato=data_ex)
     cand: list[dict] = []
     for t in txs:
         try:
@@ -1386,7 +1914,7 @@ def _ligar_aplicacao(opener: Any, item: dict, ln: dict, titulo: dict) -> dict:
         item["id_titulo"] = titulo.get("id")
         item["motivo"] = (
             f"Título único {titulo.get('id')} 30060005 existe; "
-            f"extrato pendente não encontrado (caixa {_ID_CAIXA}, "
+            f"extrato pendente não encontrado (caixa {cx}, "
             f"data {data_ex}, valor {valor:.2f}) — ligar via conciliar."
         )
         return item
@@ -1401,7 +1929,7 @@ def _ligar_aplicacao(opener: Any, item: dict, ln: dict, titulo: dict) -> dict:
     mid = _id_mov_do_titulo(titulo)
     if not mid:
         movs = query_movimentacoes_para_alvo(
-            opener, id_caixa=_ID_CAIXA, data_extrato=data_ex, valor=valor, tp="Debito"
+            opener, id_caixa=cx, data_extrato=data_ex, valor=valor, tp="Debito"
         )
         tid = str(titulo.get("id") or "")
         pool: list[tuple[str, float]] = []
@@ -1468,11 +1996,21 @@ def _executar_gravar(
     linhas_gravar: list[dict],
     modo: str,
     pagar: list[dict] | None = None,
+    receber: list[dict] | None = None,
+    id_caixa: str | int | None = None,
 ) -> tuple[list[dict], list[dict]]:
-    """Em simular: não escreve. Em executar: aplicação/tarifa/receita/liquidação."""
+    """Em simular: não escreve. Em executar: gates 0/1/N + conciliar cartão/pix/boleto."""
     criados: list[dict] = []
     executados: list[dict] = []
     opener = None
+    cx = _caixa_str(id_caixa)
+
+    def _need_session() -> Any:
+        nonlocal opener
+        if opener is None:
+            opener = mgerencia_session()
+        return opener
+
     for ln in linhas_gravar:
         classe = (ln.get("classe") or "").lower()
         item = {
@@ -1483,14 +2021,15 @@ def _executar_gravar(
             "acao": ln.get("acao"),
             "veredito": ln.get("veredito"),
             "data": ln.get("data"),
+            "sentido": ln.get("sentido"),
+            "trntype": ln.get("trntype"),
         }
         if modo == "simular":
             item["status"] = "simulado"
-            if classe in ("resgate", "rentabilidade"):
-                criados.append({**item, "tipo": "receita_avulsa_seria_criada"})
+            v = abs(float(ln.get("valor") or 0))
+            dia = _data_linha(ln)
             if classe == "aplicacao":
-                v = abs(float(ln.get("valor") or 0))
-                cands = _candidatos_aplicacao(pagar, v, _data_linha(ln))
+                cands = _candidatos_aplicacao(pagar, v, dia)
                 if len(cands) == 1:
                     item["tipo"] = "aplicacao_seria_ligada"
                     item["id_titulo"] = cands[0].get("id")
@@ -1502,23 +2041,57 @@ def _executar_gravar(
                     )
                 else:
                     item["tipo"] = "despesa_aplicacao_seria_criada"
-            if classe == "tarifa":
-                item["tipo"] = "despesa_tarifa_seria_criada"
-            if classe == "liquidacao":
+            elif classe == "tarifa":
+                cands = _candidatos_tarifa(pagar, v, dia)
+                if len(cands) == 1:
+                    item["tipo"] = "tarifa_seria_ligada"
+                    item["id_titulo"] = cands[0].get("id")
+                elif len(cands) >= 2:
+                    item["tipo"] = "tarifa_bloqueio_duplicado"
+                    item["status"] = "bloqueio_duplicado"
+                    item["motivo"] = (
+                        "Vários 30060001 no valor/dia — estornar duplicado na 1200."
+                    )
+                else:
+                    item["tipo"] = "despesa_tarifa_seria_criada"
+            elif classe in ("resgate", "rentabilidade"):
+                cands = _candidatos_receita(receber, v, dia, classe)
+                if len(cands) == 1:
+                    item["tipo"] = f"{classe}_seria_ligada"
+                    item["id_titulo"] = cands[0].get("id")
+                elif len(cands) >= 2:
+                    item["tipo"] = f"{classe}_bloqueio_duplicado"
+                    item["status"] = "bloqueio_duplicado"
+                    item["motivo"] = (
+                        "Vários 30060006 no valor/dia — estornar duplicado na 1100."
+                    )
+                else:
+                    item["tipo"] = "receita_avulsa_seria_criada"
+                    criados.append({**item, "tipo": "receita_avulsa_seria_criada"})
+            elif classe in ("liquidacao", "boleto"):
                 item["tipo"] = "lote_boleto_seria_conciliado"
+            elif classe in ("cartao", "pix"):
+                if ln.get("id"):
+                    item["tipo"] = f"{classe}_seria_ligado"
+                else:
+                    item["tipo"] = f"{classe}_sem_titulo"
             executados.append(item)
             continue
 
         try:
-            if classe in ("aplicacao", "tarifa", "resgate", "rentabilidade", "liquidacao"):
-                if opener is None:
-                    opener = mgerencia_session()
+            if classe in (
+                "aplicacao", "tarifa", "resgate", "rentabilidade",
+                "liquidacao", "boleto", "cartao", "pix",
+            ):
+                _need_session()
 
             if classe == "aplicacao":
                 v = abs(float(ln.get("valor") or 0))
                 cands = _candidatos_aplicacao(pagar, v, _data_linha(ln))
                 if len(cands) == 1:
-                    item = _ligar_aplicacao(opener, item, ln, cands[0])
+                    item = _ligar_aplicacao(
+                        opener, item, ln, cands[0], id_caixa=cx
+                    )
                 elif len(cands) >= 2:
                     item["status"] = "bloqueio_duplicado"
                     item["gravou"] = False
@@ -1528,38 +2101,141 @@ def _executar_gravar(
                     item["ids_titulos"] = [c.get("id") for c in cands]
                 else:
                     item = _gravar_despesa_snf(
-                        opener,
-                        item,
-                        ln,
+                        opener, item, ln,
                         ds_historico=_APLICACAO_DS_HISTORICO,
                         id_plano=_APLICACAO_ID_PLANO,
+                        id_caixa=cx,
                     )
                 executados.append(item)
                 continue
 
             if classe == "tarifa":
-                item = _gravar_despesa_snf(
-                    opener,
-                    item,
-                    ln,
-                    ds_historico=_TARIFA_DS_HISTORICO,
-                    id_plano=_TARIFA_ID_PLANO,
-                )
+                v = abs(float(ln.get("valor") or 0))
+                cands = _candidatos_tarifa(pagar, v, _data_linha(ln))
+                if len(cands) == 1:
+                    item = _ligar_titulo_na_linha(
+                        opener, item, ln,
+                        id_caixa=cx,
+                        id_titulo=str(cands[0].get("id") or ""),
+                        tp="Debito",
+                        prefer_hist=("TARIFA", "TX ", "TAXA"),
+                    )
+                    item["tipo"] = "tarifa_ligada"
+                elif len(cands) >= 2:
+                    item["status"] = "bloqueio_duplicado"
+                    item["gravou"] = False
+                    item["motivo"] = (
+                        "Vários 30060001 no valor/dia — estornar duplicado na 1200."
+                    )
+                    item["ids_titulos"] = [c.get("id") for c in cands]
+                else:
+                    item = _gravar_despesa_snf(
+                        opener, item, ln,
+                        ds_historico=_TARIFA_DS_HISTORICO,
+                        id_plano=_TARIFA_ID_PLANO,
+                        id_caixa=cx,
+                    )
                 executados.append(item)
                 continue
 
             if classe in ("resgate", "rentabilidade"):
+                v = abs(float(ln.get("valor") or 0))
                 hist = "resgate" if classe == "resgate" else "rentabilidade"
-                item, criado = _gravar_receita_e_baixa(
-                    opener, item, ln, ds_historico=hist
-                )
-                if criado is not None:
-                    criados.append(criado)
+                cands = _candidatos_receita(receber, v, _data_linha(ln), classe)
+                if len(cands) == 1:
+                    item = _ligar_titulo_na_linha(
+                        opener, item, ln,
+                        id_caixa=cx,
+                        id_titulo=str(cands[0].get("id") or ""),
+                        tp="Credito",
+                        prefer_hist=(hist.upper(),),
+                    )
+                    item["tipo"] = f"{classe}_ligada"
+                elif len(cands) >= 2:
+                    item["status"] = "bloqueio_duplicado"
+                    item["gravou"] = False
+                    item["motivo"] = (
+                        "Vários 30060006 no valor/dia — estornar duplicado na 1100."
+                    )
+                    item["ids_titulos"] = [c.get("id") for c in cands]
+                else:
+                    item, criado = _gravar_receita_e_baixa(
+                        opener, item, ln, ds_historico=hist, id_caixa=cx
+                    )
+                    if criado is not None:
+                        criados.append(criado)
                 executados.append(item)
                 continue
 
-            if classe == "liquidacao":
-                item = _gravar_liquidacao(opener, item, ln)
+            if classe in ("liquidacao", "boleto"):
+                item = _gravar_liquidacao(opener, item, ln, id_caixa=cx)
+                executados.append(item)
+                continue
+
+            if classe == "cartao":
+                tid = ln.get("id")
+                if not tid:
+                    item["status"] = "stub_noop"
+                    item["gravou"] = False
+                    item["motivo"] = "Cartão GRAVAR sem id de título — use a tela."
+                    executados.append(item)
+                    continue
+                item = _ligar_titulo_na_linha(
+                    opener, item, ln,
+                    id_caixa=cx,
+                    id_titulo=str(tid),
+                    tp="Credito",
+                    prefer_hist=("CIELO", "CARTAO", "VISA", "MASTER", "ELO", "AMEX", "REDE"),
+                )
+                item["tipo"] = "cartao_ligado"
+                executados.append(item)
+                continue
+
+            if classe == "pix":
+                tid = ln.get("id")
+                v = abs(float(ln.get("valor") or 0))
+                dia = _data_linha(ln)
+                if tid:
+                    # tenta ligar; se extrato/mov ausente → ja_pago_painel
+                    before = dict(item)
+                    item = _ligar_titulo_na_linha(
+                        opener, item, ln,
+                        id_caixa=cx,
+                        id_titulo=str(tid),
+                        tp="Credito",
+                        prefer_hist=("PIX",),
+                    )
+                    if item.get("status") == "erro" and (
+                        "Extrato pendente" in (item.get("motivo") or "")
+                        or "Sem movimentação" in (item.get("motivo") or "")
+                    ):
+                        item["status"] = "ja_pago_painel"
+                        item["gravou"] = False
+                        item["id_titulo"] = tid
+                        item["motivo"] = (
+                            f"Pix {v:.2f}: título {tid} já pago no caixa {cx}; "
+                            "movimento/extrato não aparece. Não liguei e não criei outro."
+                        )
+                    executados.append(item)
+                    continue
+                # sem id: se há exatamente 1 título no valor já pago → ja_pago_painel
+                cand = [
+                    t for t in (receber or [])
+                    if abs(float(t.get("valor") or 0) - v) <= 0.02
+                    and _mesmo_dia_titulo(dia, _data_do_titulo(t))
+                ]
+                if len(cand) == 1:
+                    item["status"] = "ja_pago_painel"
+                    item["gravou"] = False
+                    item["id_titulo"] = cand[0].get("id")
+                    item["motivo"] = (
+                        f"Pix {v:.2f}: título {cand[0].get('id')} já no painel; "
+                        "sem movimento para ligar. Não criei outro."
+                    )
+                else:
+                    item["status"] = "stub_noop"
+                    item["gravou"] = False
+                    item["motivo"] = "Pix sem título único — use a tela."
                 executados.append(item)
                 continue
 
@@ -1570,17 +2246,69 @@ def _executar_gravar(
             executados.append(item)
             continue
 
-        # demais classes sem captura
         item["status"] = "stub_noop"
         item["gravou"] = False
         item["motivo"] = (
             "AVISO: modo executar — escrita implementada para aplicacao, "
-            "tarifa, rentabilidade, resgate e liquidacao. "
+            "tarifa, rentabilidade, resgate, liquidacao/boleto, cartao e pix. "
             f"Classe '{classe}': use a tela."
         )
         executados.append(item)
     return criados, executados
 
+
+
+def _contagens_honestas(executados: list[dict], ariadna: list[dict]) -> tuple[int, int, bool]:
+    """conciliado = só status gravado; falta = ariadna + stubs/bloqueios/erros/ja_*."""
+    conciliado = sum(1 for e in executados if e.get("status") == "gravado")
+    falta_status = {
+        "ariadna",
+        "stub_noop",
+        "bloqueio_duplicado",
+        "erro",
+        "ja_existe_ligar",
+        "ja_pago_painel",
+    }
+    falta = len(ariadna) + sum(
+        1 for e in executados if e.get("status") in falta_status
+    )
+    fechado = falta == 0 and conciliado >= 1
+    return conciliado, falta, fechado
+
+
+def _totais_entrada_saida(decisoes: list[dict]) -> tuple[float, float]:
+    ent = sai = 0.0
+    for d in decisoes:
+        try:
+            v = abs(float(d.get("valor") or 0))
+        except (TypeError, ValueError):
+            continue
+        sentido = str(d.get("sentido") or "").lower()
+        sinal = str(d.get("trntype") or d.get("tipo") or "").upper()
+        if sentido == "saida" or sinal in ("DEBIT", "DEBITO", "D", "SAIDA", "XFER", "PAYMENT", "POS", "ATM"):
+            sai += v
+        elif sentido == "entrada" or sinal in ("CREDIT", "CREDITO", "C", "ENTRADA", "DEP", "DIRECTDEP"):
+            ent += v
+        else:
+            cl = (d.get("classe") or "").lower()
+            if cl in ("aplicacao", "tarifa"):
+                sai += v
+            elif cl in ("resgate", "rentabilidade", "liquidacao", "boleto", "cartao"):
+                ent += v
+            elif cl == "pix":
+                # pix: default entrada se não houver sentido
+                vs = d.get("valor_signed")
+                if vs is not None and float(vs) < 0:
+                    sai += v
+                else:
+                    ent += v
+            else:
+                vs = d.get("valor_signed")
+                if vs is not None and float(vs) < 0:
+                    sai += v
+                else:
+                    ent += v
+    return round(ent, 2), round(sai, 2)
 
 
 def _mensagem_fechamento(
@@ -1598,61 +2326,26 @@ def _mensagem_fechamento(
         dia_br = dt.strftime("%d/%m")
     except ValueError:
         dia_br = data
-    ligadas = sum(
-        1
-        for e in executados
-        if e.get("status") in ("gravado", "simulado")
-        or e.get("gravou") is True
-    )
-    # bloqueios / ja_existe contam como tratados mas não ligados
-    bloqueios = [e for e in executados if e.get("status") in (
-        "bloqueio_duplicado", "ja_existe_ligar", "erro", "stub_noop"
-    )]
-    falta = len(ariadna) + sum(
-        1 for e in bloqueios if e.get("status") in ("bloqueio_duplicado", "ja_existe_ligar", "erro", "stub_noop")
-    )
-    # entrada/saída do OFX
-    ent = sai = 0.0
-    for d in decisoes:
-        try:
-            v = float(d.get("valor") or 0)
-        except (TypeError, ValueError):
-            continue
-        # sinal: se houver campo tipo/direcao
-        sinal = str(d.get("tipo") or d.get("trntype") or d.get("sentido") or "").upper()
-        if sinal in ("CREDIT", "CREDITO", "C", "ENTRADA"):
-            ent += abs(v)
-        elif sinal in ("DEBIT", "DEBITO", "D", "SAIDA"):
-            sai += abs(v)
-        else:
-            # classes tipicamente saída
-            cl = (d.get("classe") or "").lower()
-            if cl in ("aplicacao", "tarifa", "pix"):
-                # pix pode ser entrada; se valor negativo no raw...
-                if v < 0 or cl in ("aplicacao", "tarifa"):
-                    sai += abs(v)
-                else:
-                    ent += abs(v)
-            elif cl in ("resgate", "rentabilidade", "liquidacao", "boleto", "cartao"):
-                ent += abs(v)
-            else:
-                ent += abs(v) if v >= 0 else 0
-                sai += abs(v) if v < 0 else 0
+    conciliado, falta, fechado = _contagens_honestas(executados, ariadna)
+    ent, sai = _totais_entrada_saida(decisoes)
+
     def _br(n: float) -> str:
         return f"{n:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-    fecha_txt = ""
     if abs(ent - sai) <= 0.02 and (ent or sai):
         fecha_txt = f" Entrada e saída fecham em {_br(ent)}."
     elif ent or sai:
         fecha_txt = f" Entrada {_br(ent)}; saída {_br(sai)}."
-    n_grav = sum(1 for e in executados if e.get("status") == "gravado" or e.get("gravou") is True)
+    else:
+        fecha_txt = ""
+
+    estado = "fechado" if fechado else "aberto"
     head = (
         f"Dia {dia_br}, caixa {caixa}.{fecha_txt} "
-        f"Na central: {ligadas} ligadas, {len(ariadna)} em falta, ajuste 0."
+        f"Na central: {conciliado} ligadas, {falta} em falta, ajuste 0 ({estado})."
     )
     if modo == "executar" and executados:
-        head += f" Executar: {n_grav}/{len(executados)} gravado."
+        head += f" Executar: {conciliado}/{len(executados)} gravado."
     elif modo == "simular":
         head += f" Simular. GRAVAR {len(executados)}. ARIADNA {len(ariadna)}."
 
@@ -1676,7 +2369,7 @@ def _mensagem_fechamento(
         partes = []
         for e in itens:
             st = e.get("status")
-            if st == "gravado" or e.get("gravou"):
+            if st == "gravado":
                 partes.append(f"{_vf(e.get('valor'))} ligado")
             elif st == "ariadna":
                 partes.append(f"{_vf(e.get('valor'))} em falta")
@@ -1685,14 +2378,22 @@ def _mensagem_fechamento(
         blocos.append("Cartão. " + "; ".join(partes) + ".")
     if "pix" in by_cl:
         for e in by_cl["pix"]:
-            if e.get("status") == "ariadna":
+            st = e.get("status")
+            if st == "ariadna":
                 blocos.append(
                     f"Pix {_vf(e.get('valor'))}. {e.get('acao') or 'Em falta.'}"
                 )
+            elif st == "ja_pago_painel":
+                blocos.append(
+                    f"Pix {_vf(e.get('valor'))}. Travou no painel. "
+                    f"{e.get('motivo') or 'Já pago; não liguei e não criei outro.'}"
+                )
+            elif st == "gravado":
+                blocos.append(f"Pix {_vf(e.get('valor'))}. Ligado.")
             else:
                 blocos.append(
                     f"Pix {_vf(e.get('valor'))}. "
-                    + ("Ligado." if e.get("gravou") or e.get("status") == "gravado" else (e.get("motivo") or e.get("status") or ""))
+                    + (e.get("motivo") or st or "")
                 )
     if "aplicacao" in by_cl:
         for e in by_cl["aplicacao"]:
@@ -1709,12 +2410,12 @@ def _mensagem_fechamento(
                     f"Aplicação {v}. Título único já existe; "
                     f"{e.get('motivo') or 'ligar via conciliar.'}"
                 )
-            elif st == "gravado" or e.get("gravou"):
+            elif st == "gravado":
                 tip = e.get("tipo") or ""
                 if tip == "aplicacao_ligada":
                     blocos.append(f"Aplicação {v}. Ligada no título existente.")
                 else:
-                    blocos.append(f"Aplicação {v}. Criada e baixada.")
+                    blocos.append(f"Aplicação {v}. Criada, baixada e ligada.")
             elif st == "simulado":
                 tip = e.get("tipo") or ""
                 if tip == "aplicacao_bloqueio_duplicado":
@@ -1732,10 +2433,23 @@ def _mensagem_fechamento(
         if cl in ("cartao", "pix", "aplicacao"):
             continue
         for e in by_cl[cl]:
-            if e.get("status") == "ariadna":
+            st = e.get("status")
+            if st == "ariadna":
                 blocos.append(
                     f"{cl.capitalize()} {_vf(e.get('valor'))}. "
                     f"{e.get('acao') or 'Em falta.'}"
+                )
+            elif st == "bloqueio_duplicado":
+                blocos.append(
+                    f"{cl.capitalize()} {_vf(e.get('valor'))}. "
+                    f"{e.get('motivo') or 'Duplicado — não criei.'}"
+                )
+            elif st == "gravado":
+                blocos.append(f"{cl.capitalize()} {_vf(e.get('valor'))}. Gravado.")
+            elif st and st not in ("simulado",):
+                blocos.append(
+                    f"{cl.capitalize()} {_vf(e.get('valor'))}. "
+                    f"{e.get('motivo') or st}"
                 )
 
     body = "\n\n".join(blocos)
@@ -1743,6 +2457,8 @@ def _mensagem_fechamento(
     if body:
         return f"{head}\n\n{body}{pdf_line}".strip()
     return f"{head}{pdf_line}".strip()
+
+
 
 
 
@@ -1762,12 +2478,13 @@ def _montar_json_pdf(
         by_classe.setdefault((e.get("classe") or "outros").lower(), []).append(e)
     fechou = []
     for classe, items in sorted(by_classe.items()):
-        feito = items[0].get("acao") or "Baixado e ligado."
+        gravados = [x for x in items if x.get("status") == "gravado"]
+        if not gravados:
+            continue
+        feito = gravados[0].get("acao") or "Baixado e ligado."
         if modo == "simular":
             feito = f"[simular] {feito}"
-        elif items[0].get("status") == "stub_noop":
-            feito = f"[pendente tela] {feito}"
-        fechou.append({"classe": classe, "qtd": len(items), "feito": feito})
+        fechou.append({"classe": classe, "qtd": len(gravados), "feito": feito})
     falta_linhas = []
     for a in ariadna:
         falta_linhas.append(
@@ -1777,11 +2494,23 @@ def _montar_json_pdf(
                 "acao": a.get("acao") or f"Extrato: {a.get('nome') or ''}",
             }
         )
-    conciliado = len(executados)
-    falta = len(ariadna)
-    fechado = falta == 0 and conciliado > 0
-    if conciliado == 0 and falta == 0:
-        fechado = False
+    for e in executados:
+        st = e.get("status")
+        if st in (
+            "stub_noop",
+            "bloqueio_duplicado",
+            "erro",
+            "ja_existe_ligar",
+            "ja_pago_painel",
+        ):
+            falta_linhas.append(
+                {
+                    "valor": f"{float(e.get('valor') or 0):.2f}".replace(".", ","),
+                    "classe": e.get("classe") or "",
+                    "acao": e.get("motivo") or st,
+                }
+            )
+    conciliado, falta, fechado = _contagens_honestas(executados, ariadna)
     return {
         "data": data,
         "linhas": len(linhas),
@@ -1794,16 +2523,17 @@ def _montar_json_pdf(
         or ([{"classe": "—", "qtd": 0, "feito": "Nada gravado nesta passagem."}] if not falta_linhas else []),
         "falta_linhas": falta_linhas,
         "gravado": (
-            f"Modo {modo}. GRAVAR {conciliado}. ARIADNA {falta}."
+            f"Modo {modo}. GRAVAR/conciliado {conciliado}. Falta {falta}."
             + (
-                " Escrita: aplicacao/tarifa (criar.consumo.snf), "
-                "resgate/rentabilidade (criar.novo+receber_transaction), "
-                "liquidacao (conciliar)."
+                " Escrita: aplicacao/tarifa (gate 0/1/N + criar.consumo.snf + conciliar), "
+                "resgate/rentabilidade (gate + criar.novo+baixa + conciliar), "
+                "liquidacao/boleto/cartao/pix (conciliar)."
                 if modo == "executar"
                 else ""
             )
         ),
     }
+
 
 
 def gerar_pdf(dados: dict[str, Any], pdf_path: str) -> str:
@@ -1859,7 +2589,7 @@ def conciliar_dia_valenlub(
     cielo_csv_path: str | None = None,
     modo: str = "simular",
 ) -> ResultadoConciliacao:
-    """Concilia o caixa 4 do dia. Skill 1.33.0.
+    """Concilia o caixa 4 do dia. Skill 1.38.0.
 
     modo: "simular" (default) ou "executar".
     """
@@ -1938,8 +2668,11 @@ def conciliar_dia_valenlub(
     cielo_rows = ler_cielo_csv(cielo_csv_path)
     extrato = enriquecer_cartao_com_cielo(extrato, cielo_rows)
 
+    dump_prefix = f"{data}-caixa{caixa}"
     try:
-        receber, pagar, avisos = carregar_query(data, caixa)
+        receber, pagar, avisos = carregar_query(
+            data, caixa, dump_prefix=dump_prefix
+        )
     except RuntimeError as exc:
         return ResultadoConciliacao(
             status="erro",
@@ -1953,15 +2686,20 @@ def conciliar_dia_valenlub(
         )
     erros.extend(avisos)
 
+    _dump_json(_cache_dir() / f"{dump_prefix}-extrato.json", extrato)
+
     decisoes = decidir(extrato, receber, pagar)
     gravar = [d for d in decisoes if d.get("veredito") == "GRAVAR"]
     ariadna = [d for d in decisoes if d.get("veredito") == "ARIADNA"]
 
-    criados, executados = _executar_gravar(gravar, modo, pagar=pagar)
+    _dump_json(_cache_dir() / f"{dump_prefix}-decisao.json", decisoes)
+
+    criados, executados = _executar_gravar(
+        gravar, modo, pagar=pagar, receber=receber, id_caixa=caixa
+    )
 
     if pdf_path is None:
-        out_dir = ROOT / "cache" / "conciliacao"
-        out_dir.mkdir(parents=True, exist_ok=True)
+        out_dir = _cache_dir()
         pdf_path = str(out_dir / f"conciliacao-{data}-caixa{caixa}.pdf")
 
     pdf_ok: str | None = None
@@ -1971,13 +2709,10 @@ def conciliar_dia_valenlub(
     except Exception as exc:  # noqa: BLE001
         erros.append(f"PDF: {exc}")
 
-    status = "ok"
+    conciliado, falta, fechado = _contagens_honestas(executados, ariadna)
+    status = "fechado" if fechado else ("aberto" if (falta or ariadna) else "ok")
     if erros and not receber and not pagar:
         status = "parcial"
-    if ariadna:
-        status = "aberto" if status == "ok" else status
-    if not ariadna and executados:
-        status = "fechado" if status in ("ok", "fechado") else status
 
     return ResultadoConciliacao(
         status=status,
@@ -1988,6 +2723,8 @@ def conciliar_dia_valenlub(
             "linhas": len(decisoes),
             "gravar": len(gravar),
             "ariadna": len(ariadna),
+            "conciliado": conciliado,
+            "falta": falta,
             "receber_query": len(receber),
             "pagar_query": len(pagar),
         },
@@ -2030,7 +2767,7 @@ def _hermes_handler(args: dict, **kwargs) -> str:  # noqa: ARG001
 _HERMES_SCHEMA = {
     "name": "conciliar_dia_valenlub",
     "description": (
-        "Concilia o caixa 4 ValenLub no dia informado (skill 1.33.0). "
+        "Concilia o caixa 4 ValenLub no dia informado (skill 1.38.0). "
         "Lê OFX, GET Query contas-receber/contas-a-pagar, decide GRAVAR/ARIADNA, "
         "executa ou simula, gera PDF no visual aprovado."
     ),
