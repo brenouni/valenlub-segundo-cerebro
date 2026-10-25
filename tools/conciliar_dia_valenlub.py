@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conciliação do caixa 4 ValenLub — skill 1.38.1.
+"""Conciliação do caixa 4 ValenLub — skill 1.38.2.
 
 Função principal: conciliar_dia_valenlub(...)
 
@@ -1387,6 +1387,31 @@ def query_conciliar_lote(
     return _post_urlencoded(opener, url, fields)
 
 
+
+def query_estornar_pagar(
+    opener: Any,
+    *,
+    id_cobranca_pagar: str | int,
+    id_caixa_baixa: str | int | None = None,
+    ds_motivo_estorno: str = "Duplicado conciliação — estorno automático",
+) -> str:
+    """POST estornar contas a pagar (captura 1200).
+
+    Endpoint: /mgerencia/scripts/financeiro/cobrancas_pagar/actions/estornar
+    Fields: idCobrancaPagar, idCaixaBaixa, dsMotivoEstorno.
+    """
+    fields = {
+        "idCobrancaPagar": str(id_cobranca_pagar),
+        "idCaixaBaixa": str(id_caixa_baixa if id_caixa_baixa is not None else _ID_CAIXA),
+        "dsMotivoEstorno": ds_motivo_estorno,
+    }
+    url = (
+        f"{_mgerencia_base()}"
+        "/scripts/financeiro/cobrancas_pagar/actions/estornar"
+    )
+    return _post_urlencoded(opener, url, fields)
+
+
 def _eh_cartao_mov(m: dict) -> bool:
     blob = " ".join(
         str(m.get(k) or "")
@@ -2028,6 +2053,94 @@ def _ligar_aplicacao(
     return item
 
 
+
+def _titulo_id(t: dict) -> str:
+    tid = t.get("id")
+    return str(tid).strip() if tid is not None else ""
+
+
+def _pick_stable(cands: list[dict]) -> dict:
+    """Escolha estável: menor id numérico, senão menor string."""
+    def key(t: dict):
+        tid = _titulo_id(t)
+        try:
+            return (0, int(tid))
+        except (TypeError, ValueError):
+            return (1, tid)
+    return sorted(cands, key=key)[0]
+
+
+def _count_ofx_mesmo_valor(linhas_gravar: list[dict], classe: str, valor: float) -> int:
+    alvo = abs(float(valor))
+    n = 0
+    for x in linhas_gravar:
+        if (x.get("classe") or "").lower() != classe:
+            continue
+        try:
+            vx = abs(float(x.get("valor") or 0))
+        except (TypeError, ValueError):
+            continue
+        if abs(vx - alvo) <= 0.02:
+            n += 1
+    return n
+
+
+def _cands_livres(cands: list[dict], used: set[str]) -> list[dict]:
+    out = []
+    for t in cands:
+        tid = _titulo_id(t)
+        if not tid or tid in used:
+            continue
+        out.append(t)
+    return out
+
+
+def _decidir_gate_pool(
+    *,
+    cands_all: list[dict],
+    used: set[str],
+    n_ofx: int,
+    plano_label: str,
+    tela_estorno: str,
+) -> tuple[str, dict | None, str]:
+    """Gate 0/1/N com pool 1:1.
+
+    Retorna (acao, titulo|None, motivo):
+      - "ligar": pick 1 livre
+      - "criar": pool esgotado (0 livres)
+      - "bloqueio": 1 OFX + >=2 livres (ambíguo) OU nota de extras (M>N) só no último?
+        bloqueio só quando 1 OFX e >=2 cands livres.
+    """
+    livres = _cands_livres(cands_all, used)
+    m_total = len(cands_all)
+    m_livres = len(livres)
+
+    if m_livres == 0:
+        return "criar", None, ""
+
+    # 1 OFX + >=2 títulos livres → ambíguo, não escolher
+    if n_ofx <= 1 and m_livres >= 2:
+        ids = [_titulo_id(t) for t in livres]
+        return (
+            "bloqueio",
+            None,
+            f"Vários {plano_label} no valor/dia ({', '.join(ids)}) — "
+            f"1 linha OFX e {m_livres} títulos; estornar duplicado na {tela_estorno}.",
+        )
+
+    # N OFX + M títulos: consumir 1:1
+    pick = _pick_stable(livres)
+    motivo_extra = ""
+    if m_total > n_ofx:
+        # sobram extras no pool — nota informativa (não bloqueia a ligação)
+        sobra = m_total - n_ofx
+        motivo_extra = (
+            f"Pool 1:1: {n_ofx} OFX × {m_total} títulos; "
+            f"{sobra} sobra(m) p/ estornar na {tela_estorno}."
+        )
+    return "ligar", pick, motivo_extra
+
+
 def _executar_gravar(
     linhas_gravar: list[dict],
     modo: str,
@@ -2035,11 +2148,12 @@ def _executar_gravar(
     receber: list[dict] | None = None,
     id_caixa: str | int | None = None,
 ) -> tuple[list[dict], list[dict]]:
-    """Em simular: não escreve. Em executar: gates 0/1/N + conciliar cartão/pix/boleto."""
+    """Em simular: não escreve. Em executar: gates 0/1/N pool 1:1 + conciliar cartão/pix/boleto."""
     criados: list[dict] = []
     executados: list[dict] = []
     opener = None
     cx = _caixa_str(id_caixa)
+    used_title_ids: set[str] = set()
 
     def _need_session() -> Any:
         nonlocal opener
@@ -2066,41 +2180,62 @@ def _executar_gravar(
             dia = _data_linha(ln)
             if classe == "aplicacao":
                 cands = _candidatos_aplicacao(pagar, v, dia)
-                if len(cands) == 1:
+                n_ofx = _count_ofx_mesmo_valor(linhas_gravar, "aplicacao", v)
+                acao, pick, motivo = _decidir_gate_pool(
+                    cands_all=cands, used=used_title_ids, n_ofx=n_ofx,
+                    plano_label="30060005", tela_estorno="1200",
+                )
+                if acao == "ligar" and pick is not None:
                     item["tipo"] = "aplicacao_seria_ligada"
-                    item["id_titulo"] = cands[0].get("id")
-                elif len(cands) >= 2:
+                    item["id_titulo"] = pick.get("id")
+                    if motivo:
+                        item["motivo"] = motivo
+                    used_title_ids.add(_titulo_id(pick))
+                elif acao == "bloqueio":
                     item["tipo"] = "aplicacao_bloqueio_duplicado"
                     item["status"] = "bloqueio_duplicado"
-                    item["motivo"] = (
-                        "Vários 30060005 no valor/dia — estornar duplicado na 1200."
-                    )
+                    item["motivo"] = motivo
+                    item["ids_titulos"] = [_titulo_id(t) for t in _cands_livres(cands, used_title_ids)]
                 else:
                     item["tipo"] = "despesa_aplicacao_seria_criada"
             elif classe == "tarifa":
                 cands = _candidatos_tarifa(pagar, v, dia)
-                if len(cands) == 1:
+                n_ofx = _count_ofx_mesmo_valor(linhas_gravar, "tarifa", v)
+                acao, pick, motivo = _decidir_gate_pool(
+                    cands_all=cands, used=used_title_ids, n_ofx=n_ofx,
+                    plano_label="30060001", tela_estorno="1200",
+                )
+                if acao == "ligar" and pick is not None:
                     item["tipo"] = "tarifa_seria_ligada"
-                    item["id_titulo"] = cands[0].get("id")
-                elif len(cands) >= 2:
+                    item["id_titulo"] = pick.get("id")
+                    if motivo:
+                        item["motivo"] = motivo
+                    used_title_ids.add(_titulo_id(pick))
+                elif acao == "bloqueio":
                     item["tipo"] = "tarifa_bloqueio_duplicado"
                     item["status"] = "bloqueio_duplicado"
-                    item["motivo"] = (
-                        "Vários 30060001 no valor/dia — estornar duplicado na 1200."
-                    )
+                    item["motivo"] = motivo
+                    item["ids_titulos"] = [_titulo_id(t) for t in _cands_livres(cands, used_title_ids)]
                 else:
                     item["tipo"] = "despesa_tarifa_seria_criada"
             elif classe in ("resgate", "rentabilidade"):
                 cands = _candidatos_receita(receber, v, dia, classe)
-                if len(cands) == 1:
+                n_ofx = _count_ofx_mesmo_valor(linhas_gravar, classe, v)
+                acao, pick, motivo = _decidir_gate_pool(
+                    cands_all=cands, used=used_title_ids, n_ofx=n_ofx,
+                    plano_label="30060006", tela_estorno="1100",
+                )
+                if acao == "ligar" and pick is not None:
                     item["tipo"] = f"{classe}_seria_ligada"
-                    item["id_titulo"] = cands[0].get("id")
-                elif len(cands) >= 2:
+                    item["id_titulo"] = pick.get("id")
+                    if motivo:
+                        item["motivo"] = motivo
+                    used_title_ids.add(_titulo_id(pick))
+                elif acao == "bloqueio":
                     item["tipo"] = f"{classe}_bloqueio_duplicado"
                     item["status"] = "bloqueio_duplicado"
-                    item["motivo"] = (
-                        "Vários 30060006 no valor/dia — estornar duplicado na 1100."
-                    )
+                    item["motivo"] = motivo
+                    item["ids_titulos"] = [_titulo_id(t) for t in _cands_livres(cands, used_title_ids)]
                 else:
                     item["tipo"] = "receita_avulsa_seria_criada"
                     criados.append({**item, "tipo": "receita_avulsa_seria_criada"})
@@ -2154,17 +2289,25 @@ def _executar_gravar(
             if classe == "aplicacao":
                 v = abs(float(ln.get("valor") or 0))
                 cands = _candidatos_aplicacao(pagar, v, _data_linha(ln))
-                if len(cands) == 1:
+                n_ofx = _count_ofx_mesmo_valor(linhas_gravar, "aplicacao", v)
+                acao, pick, motivo = _decidir_gate_pool(
+                    cands_all=cands, used=used_title_ids, n_ofx=n_ofx,
+                    plano_label="30060005", tela_estorno="1200",
+                )
+                if acao == "ligar" and pick is not None:
                     item = _ligar_aplicacao(
-                        opener, item, ln, cands[0], id_caixa=cx
+                        opener, item, ln, pick, id_caixa=cx
                     )
-                elif len(cands) >= 2:
+                    used_title_ids.add(_titulo_id(pick))
+                    if motivo:
+                        item["motivo_pool"] = motivo
+                elif acao == "bloqueio":
                     item["status"] = "bloqueio_duplicado"
                     item["gravou"] = False
-                    item["motivo"] = (
-                        "Vários 30060005 no valor/dia — estornar duplicado na 1200."
-                    )
-                    item["ids_titulos"] = [c.get("id") for c in cands]
+                    item["motivo"] = motivo
+                    item["ids_titulos"] = [
+                        _titulo_id(t) for t in _cands_livres(cands, used_title_ids)
+                    ]
                 else:
                     item = _gravar_despesa_snf(
                         opener, item, ln,
@@ -2178,22 +2321,30 @@ def _executar_gravar(
             if classe == "tarifa":
                 v = abs(float(ln.get("valor") or 0))
                 cands = _candidatos_tarifa(pagar, v, _data_linha(ln))
-                if len(cands) == 1:
+                n_ofx = _count_ofx_mesmo_valor(linhas_gravar, "tarifa", v)
+                acao, pick, motivo = _decidir_gate_pool(
+                    cands_all=cands, used=used_title_ids, n_ofx=n_ofx,
+                    plano_label="30060001", tela_estorno="1200",
+                )
+                if acao == "ligar" and pick is not None:
                     item = _ligar_titulo_na_linha(
                         opener, item, ln,
                         id_caixa=cx,
-                        id_titulo=str(cands[0].get("id") or ""),
+                        id_titulo=str(pick.get("id") or ""),
                         tp="Debito",
                         prefer_hist=("TARIFA", "TX ", "TAXA"),
                     )
                     item["tipo"] = "tarifa_ligada"
-                elif len(cands) >= 2:
+                    used_title_ids.add(_titulo_id(pick))
+                    if motivo:
+                        item["motivo_pool"] = motivo
+                elif acao == "bloqueio":
                     item["status"] = "bloqueio_duplicado"
                     item["gravou"] = False
-                    item["motivo"] = (
-                        "Vários 30060001 no valor/dia — estornar duplicado na 1200."
-                    )
-                    item["ids_titulos"] = [c.get("id") for c in cands]
+                    item["motivo"] = motivo
+                    item["ids_titulos"] = [
+                        _titulo_id(t) for t in _cands_livres(cands, used_title_ids)
+                    ]
                 else:
                     item = _gravar_despesa_snf(
                         opener, item, ln,
@@ -2208,22 +2359,30 @@ def _executar_gravar(
                 v = abs(float(ln.get("valor") or 0))
                 hist = "resgate" if classe == "resgate" else "rentabilidade"
                 cands = _candidatos_receita(receber, v, _data_linha(ln), classe)
-                if len(cands) == 1:
+                n_ofx = _count_ofx_mesmo_valor(linhas_gravar, classe, v)
+                acao, pick, motivo = _decidir_gate_pool(
+                    cands_all=cands, used=used_title_ids, n_ofx=n_ofx,
+                    plano_label="30060006", tela_estorno="1100",
+                )
+                if acao == "ligar" and pick is not None:
                     item = _ligar_titulo_na_linha(
                         opener, item, ln,
                         id_caixa=cx,
-                        id_titulo=str(cands[0].get("id") or ""),
+                        id_titulo=str(pick.get("id") or ""),
                         tp="Credito",
                         prefer_hist=(hist.upper(),),
                     )
                     item["tipo"] = f"{classe}_ligada"
-                elif len(cands) >= 2:
+                    used_title_ids.add(_titulo_id(pick))
+                    if motivo:
+                        item["motivo_pool"] = motivo
+                elif acao == "bloqueio":
                     item["status"] = "bloqueio_duplicado"
                     item["gravou"] = False
-                    item["motivo"] = (
-                        "Vários 30060006 no valor/dia — estornar duplicado na 1100."
-                    )
-                    item["ids_titulos"] = [c.get("id") for c in cands]
+                    item["motivo"] = motivo
+                    item["ids_titulos"] = [
+                        _titulo_id(t) for t in _cands_livres(cands, used_title_ids)
+                    ]
                 else:
                     item, criado = _gravar_receita_e_baixa(
                         opener, item, ln, ds_historico=hist, id_caixa=cx
@@ -2701,7 +2860,7 @@ def conciliar_dia_valenlub(
     cielo_csv_path: str | None = None,
     modo: str = "simular",
 ) -> ResultadoConciliacao:
-    """Concilia o caixa 4 do dia. Skill 1.38.1.
+    """Concilia o caixa 4 do dia. Skill 1.38.2.
 
     modo: "simular" (default) ou "executar".
     """
@@ -2880,7 +3039,7 @@ def _hermes_handler(args: dict, **kwargs) -> str:  # noqa: ARG001
 _HERMES_SCHEMA = {
     "name": "conciliar_dia_valenlub",
     "description": (
-        "Concilia o caixa 4 ValenLub no dia informado (skill 1.38.1). "
+        "Concilia o caixa 4 ValenLub no dia informado (skill 1.38.2). "
         "Lê OFX, GET Query contas-receber/contas-a-pagar, decide GRAVAR/ARIADNA, "
         "executa ou simula, gera PDF no visual aprovado."
     ),

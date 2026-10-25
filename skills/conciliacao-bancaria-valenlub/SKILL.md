@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
 description: "Conciliação do caixa 4. Anexo sem texto já é o pedido. Tela que fecha não é falta. Tente de novo."
-version: "1.38.1"
+version: "1.38.2"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -12,7 +12,7 @@ metadata:
 
 # Conciliação — ValenLub, caixa 4
 
-Fonte única. Versão 1.38.1. Você não decide. O script decide.
+Fonte única. Versão 1.38.2. Você não decide. O script decide.
 
 Não narrar passo. Não enviar mensagem de progresso. Não diga “Carrego”, “Vou achar”, “O GET veio”, “Rodo a decisão”.
 Só a mensagem final de fechamento (veredito + PDF). Zero narração de passagem.
@@ -31,7 +31,7 @@ Sem arquivo, pare. Responda sem ser marcado.
 2. Devolva só o campo `mensagem` + caminho do PDF. Zero narração. Zero UI.
 3. Não reimplemente GETs, cliques nem `decidir.py` na tela — a tool faz tudo.
 
-## Tool 1.38.1 (produção)
+## Tool 1.38.2 (produção)
 
 A tool `conciliar_dia_valenlub` é a execução. Não reimplemente na UI o que a tool já faz.
 
