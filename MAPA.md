@@ -2,9 +2,13 @@
 
 | Precisa de | Vai em |
 |---|---|
-| Rotina de conciliação (AS IS, telas, regras) | memory/context/business/conciliacao.md |
-| Regra canônica de execução | skills/conciliacao-bancaria-valenlub/SKILL.md versão 1.38.2 |
+| Financeiro (visão geral) | memory/context/business/financeiro.md |
+| Conciliação caixa 4 | memory/context/business/conciliacao.md |
+| Cobrança e régua | memory/context/business/cobranca.md |
+| Compras | memory/context/business/compras.md |
+| Faturamento | memory/context/business/faturamento.md |
 | O que a empresa é | memory/context/business/valenlub.md |
+| Regra de execução da conciliação | skills/conciliacao-bancaria-valenlub/SKILL.md versão 1.38.2 |
 | Pessoas | memory/context/people/ |
 | Fila | memory/context/pendencias.md |
 
