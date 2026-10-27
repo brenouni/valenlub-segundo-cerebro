@@ -1761,23 +1761,31 @@ def _gravar_liquidacao(
         )
         return item
 
+    # Ariadna: TODOS os PAGTO (não só mesmo dia). Mesmo-dia entra primeiro no subset.
     mesmo_dia = [
-        (i, v) for (i, v, dt) in filtrados if dia_br in dt or dt.replace("-", "/") == dia_br
-        or dt[0:10] == data_ex[:10]
+        (i, v) for (i, v, dt) in filtrados
+        if dia_br in dt or dt.replace("-", "/") == dia_br or dt[0:10] == data_ex[:10]
     ]
-    pool = mesmo_dia or [(i, v) for (i, v, _dt) in filtrados]
-    # se a soma de TODOS os PAGTO do pool fecha o alvo, usa todos
+    outros = [
+        (i, v) for (i, v, dt) in filtrados
+        if not (dia_br in dt or dt.replace("-", "/") == dia_br or dt[0:10] == data_ex[:10])
+    ]
+    pool = mesmo_dia + outros  # prioriza dia na ordem do backtrack
     soma_pool = round(sum(v for _, v in pool), 2)
+    ids = None
     if abs(soma_pool - valor) <= 0.02 and pool:
         ids = [i for i, _ in pool]
-    else:
-        ids = _subset_sum_ids(pool, valor)
+    if not ids and mesmo_dia:
+        ids = _subset_sum_ids(mesmo_dia, valor, limite=120)
+    if not ids:
+        ids = _subset_sum_ids(pool, valor, limite=120)
     if not ids:
         item["status"] = "erro"
         item["gravou"] = False
         item["motivo"] = (
             f"Lote PAGTO sem combinação que feche {valor:.2f} "
-            f"(pagto={len(pool)}, soma={soma_pool:.2f}, extrato={id_extrato})."
+            f"(pagto={len(pool)}, dia={len(mesmo_dia)}, soma={soma_pool:.2f}, "
+            f"extrato={id_extrato})."
         )
         item["id_extrato"] = id_extrato
         return item
