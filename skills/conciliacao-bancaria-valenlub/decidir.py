@@ -196,19 +196,34 @@ def decidir(ext, rec, pag):
             use = mesmo if mesmo else cand
             t, varios = _pick_nome(use, nome)
             if t is not None:
-                out.append(
-                    {
-                        **linha,
-                        "veredito": "GRAVAR",
-                        "id": t.get("id"),
-                        "classe": "pagar",
-                        "acao": (
-                            f"AP {t.get('id')} {t['valor']}. "
-                            "Débito PAGTO ELETRON/cobrança — ligue no contas a pagar. "
-                            "Não use lote PAGTO de boleto crédito."
-                        ),
-                    }
-                )
+                st = status_tit(t).lower()
+                if st.startswith("abert"):
+                    out.append(
+                        {
+                            **linha,
+                            "veredito": "ARIADNA",
+                            "id": t.get("id"),
+                            "classe": "pagar",
+                            "acao": (
+                                f"AP {t.get('id')} Aberto no valor {v:.2f}. "
+                                "Baixar na 1200 e religar. Tool não inventa baixa AP."
+                            ),
+                        }
+                    )
+                else:
+                    out.append(
+                        {
+                            **linha,
+                            "veredito": "GRAVAR",
+                            "id": t.get("id"),
+                            "classe": "pagar",
+                            "acao": (
+                                f"AP {t.get('id')} {t['valor']} ({status_tit(t) or 'Pago'}). "
+                                "Débito PAGTO ELETRON — ligue no contas a pagar. "
+                                "Não use lote PAGTO de boleto crédito."
+                            ),
+                        }
+                    )
                 continue
             if varios:
                 out.append(
@@ -504,11 +519,17 @@ def decidir(ext, rec, pag):
                     }
                 )
                 continue
+            hint = ""
+            if cielo_bruto is not None:
+                hint = (
+                    f" Cielo bruto {float(cielo_bruto):.2f} sem título no centavo — "
+                    "se for parcela de venda maior, desdobrar na tela (não usar ≈5%)."
+                )
             out.append(
                 {
                     **linha,
                     "veredito": "ARIADNA",
-                    "acao": f"Extrato: {nome}. Sem título no valor (nem Cielo bruto).",
+                    "acao": f"Extrato: {nome}. Sem título no valor (nem Cielo bruto).{hint}",
                 }
             )
             continue
