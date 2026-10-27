@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
 description: "Conciliação do caixa 4. Anexo sem texto já é o pedido. Tela que fecha não é falta. Tente de novo."
-version: "1.38.2"
+version: "1.38.3"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -12,7 +12,7 @@ metadata:
 
 # Conciliação — ValenLub, caixa 4
 
-Fonte única. Versão 1.38.2. Você não decide. O script decide.
+Fonte única. Versão 1.38.3. Você não decide. O script decide.
 
 Não narrar passo. Não enviar mensagem de progresso. Não diga “Carrego”, “Vou achar”, “O GET veio”, “Rodo a decisão”.
 Só a mensagem final de fechamento (veredito + PDF). Zero narração de passagem.
@@ -31,9 +31,9 @@ Sem arquivo, pare. Responda sem ser marcado.
 2. Devolva só o campo `mensagem` + caminho do PDF. Zero narração. Zero UI.
 3. Não reimplemente GETs, cliques nem `decidir.py` na tela — a tool faz tudo.
 
-## Tool 1.38.2 (produção)
+## Tool 1.38.3 (produção)
 
-A tool `conciliar_dia_valenlub` é a execução. Não reimplemente na UI o que a tool já faz.
+A tool `conciliar_dia_valenlub` (1.38.3) é a execução. Não reimplemente na UI o que a tool já faz.
 
 - GET paginado com `dt_baixa_ini` = dia e `dt_baixa_fim` = dia seguinte. Cache em `cache/conciliacao/`.
 - Gate 0/1/N (aplicação 30060005, tarifa 30060001, resgate/rentabilidade 30060006): 0 cria, 1 só liga, ≥2 bloqueia (estorno). Data do título obrigatória para casar; fallback valor+dia se plano+hist vazios.
@@ -57,9 +57,11 @@ Pago no bruto, diferença = taxa: ligue no líquido. Não edite.
 ## Lote de boleto
 
 Não procure um título no valor da linha.
-Selecione os recebimentos do dia. Desmarque cartão.
+Selecione TODOS os recebimentos que **iniciam com `PAGTO`** (retorno de boletos). Desmarque cartão.
 Soma bate no centavo: ligue.
 Painel sem PAGTO de boleto, ou soma dos boletos Pago no dia diferente da linha do banco: vai para a Ariadna. Não force. Não ligue parcial. Não volte.
+
+Pix do extrato já baixado: ligue pelo valor na central. Não marque como falta de título se a baixa já foi feita.
 
 ## Resgate — lançar e baixar
 

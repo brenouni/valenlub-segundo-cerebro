@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conciliação do caixa 4 ValenLub — skill 1.38.2.
+"""Conciliação do caixa 4 ValenLub — skill 1.38.3.
 
 Função principal: conciliar_dia_valenlub(...)
 
@@ -546,6 +546,10 @@ def _normalize_titulos(payload: Any) -> list[dict[str, Any]]:
             or t.get("vrTitulo")
             or t.get("valor_titulo")
             or t.get("vlr")
+            or t.get("vrCobrancaReceber")
+            or t.get("vrCobrancaPagar")
+            or t.get("vrPago")
+            or t.get("vrBruto")
             or vals.get("vrCobrancaPagar")
             or vals.get("vrCobrancaReceber")
             or vals.get("vrPago")
@@ -1658,10 +1662,33 @@ def _ligar_titulo_na_linha(
     return item
 
 
+def _hist_mov(m: dict) -> str:
+    """Histórico/descrição da movimentação aberta (tela de conciliação)."""
+    for k in (
+        "hist",
+        "dsHistorico",
+        "historico",
+        "descricao",
+        "ds",
+        "nome",
+        "memo",
+        "dsMovimentacao",
+    ):
+        v = m.get(k)
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    return ""
+
+
+def _eh_pagto_mov(m: dict) -> bool:
+    """Ariadna 2026-10-27: liquidação = só recebimentos que INICIAM com PAGTO."""
+    return _hist_mov(m).upper().startswith("PAGTO")
+
+
 def _gravar_liquidacao(
     opener: Any, item: dict, ln: dict, *, id_caixa: str | int | None = None
 ) -> dict:
-    """Lote de boleto: achar linha OFX + movimentações do dia (sem cartão) e conciliar."""
+    """Lote de boleto: extrato + movimentações PAGTO* do dia; POST conciliar."""
     cx = _caixa_str(id_caixa)
     data_ex = _data_linha(ln)
     valor = abs(float(ln.get("valor") or 0))
@@ -1702,12 +1729,16 @@ def _gravar_liquidacao(
     movs = query_movimentacoes_para_alvo(
         opener, id_caixa=cx, data_extrato=data_ex, valor=valor, tp="Credito"
     )
-    # skill: recebimentos do dia; desmarque cartão
+    # skill + Ariadna: só recebimentos que COMEÇAM com PAGTO; desmarque cartão
     dia_br = _data_br(data_ex)  # DD/MM/YYYY
-    filtrados: list[tuple[str, float]] = []
+    filtrados: list[tuple[str, float, str]] = []
+    n_pagto = 0
     for m in movs:
         if _eh_cartao_mov(m):
             continue
+        if not _eh_pagto_mov(m):
+            continue
+        n_pagto += 1
         mid = m.get("idMovimentacao") or m.get("id")
         if mid is None:
             continue
@@ -1718,21 +1749,35 @@ def _gravar_liquidacao(
         if vr <= 0:
             continue
         dt = str(m.get("data") or m.get("dt") or "")
-        # prefer same calendar day; if none match later, fall back
         filtrados.append((str(mid), vr, dt))
+
+    if n_pagto == 0:
+        item["status"] = "erro"
+        item["gravou"] = False
+        item["id_extrato"] = id_extrato
+        item["motivo"] = (
+            f"Painel sem PAGTO de boleto (movs={len(movs)}, extrato={id_extrato}). "
+            "Ariadna: não force lote sem prefixo PAGTO."
+        )
+        return item
 
     mesmo_dia = [
         (i, v) for (i, v, dt) in filtrados if dia_br in dt or dt.replace("-", "/") == dia_br
         or dt[0:10] == data_ex[:10]
     ]
     pool = mesmo_dia or [(i, v) for (i, v, _dt) in filtrados]
-    ids = _subset_sum_ids(pool, valor)
+    # se a soma de TODOS os PAGTO do pool fecha o alvo, usa todos
+    soma_pool = round(sum(v for _, v in pool), 2)
+    if abs(soma_pool - valor) <= 0.02 and pool:
+        ids = [i for i, _ in pool]
+    else:
+        ids = _subset_sum_ids(pool, valor)
     if not ids:
         item["status"] = "erro"
         item["gravou"] = False
         item["motivo"] = (
-            f"Lote sem combinação que feche {valor:.2f} "
-            f"(movs={len(pool)}, extrato={id_extrato})."
+            f"Lote PAGTO sem combinação que feche {valor:.2f} "
+            f"(pagto={len(pool)}, soma={soma_pool:.2f}, extrato={id_extrato})."
         )
         item["id_extrato"] = id_extrato
         return item
@@ -1756,6 +1801,7 @@ def _gravar_liquidacao(
     )
     item["id_extrato"] = id_extrato
     item["ids_movimentacao"] = ids
+    item["filtro"] = "PAGTO*"
     if not ok:
         item["motivo"] = "Conciliação sem isOk."
     return item
@@ -2477,13 +2523,29 @@ def _executar_gravar(
                         )
                     executados.append(item)
                     continue
-                # sem id: se há exatamente 1 título no valor já pago → ja_pago_painel
+                # sem id: Ariadna — Pix já baixado liga pelo valor na central
                 cand = [
                     t for t in (receber or [])
                     if abs(float(t.get("valor") or 0) - v) <= 0.02
                     and _mesmo_dia_titulo(dia, _data_do_titulo(t))
                 ]
-                if len(cand) == 1:
+                tid_guess = str(cand[0].get("id")) if len(cand) == 1 else None
+                item = _ligar_titulo_na_linha(
+                    opener, item, ln,
+                    id_caixa=cx,
+                    id_titulo=tid_guess,
+                    tp="Credito",
+                    prefer_hist=("PIX",),
+                    excluir_cartao=True,
+                )
+                if item.get("status") == "gravado":
+                    item["tipo"] = "pix_ligado_valor"
+                    executados.append(item)
+                    continue
+                if len(cand) == 1 and item.get("status") == "erro" and (
+                    "Extrato pendente" in (item.get("motivo") or "")
+                    or "Sem movimentação" in (item.get("motivo") or "")
+                ):
                     item["status"] = "ja_pago_painel"
                     item["gravou"] = False
                     item["id_titulo"] = cand[0].get("id")
@@ -2491,10 +2553,12 @@ def _executar_gravar(
                         f"Pix {v:.2f}: título {cand[0].get('id')} já no painel; "
                         "sem movimento para ligar. Não criei outro."
                     )
-                else:
-                    item["status"] = "stub_noop"
+                elif item.get("status") != "gravado":
+                    item["status"] = item.get("status") or "erro"
                     item["gravou"] = False
-                    item["motivo"] = "Pix sem título único — use a tela."
+                    item["motivo"] = item.get("motivo") or (
+                        f"Pix {v:.2f}: sem movimentação no valor para ligar."
+                    )
                 executados.append(item)
                 continue
 
@@ -2860,7 +2924,7 @@ def conciliar_dia_valenlub(
     cielo_csv_path: str | None = None,
     modo: str = "simular",
 ) -> ResultadoConciliacao:
-    """Concilia o caixa 4 do dia. Skill 1.38.2.
+    """Concilia o caixa 4 do dia. Skill 1.38.3.
 
     modo: "simular" (default) ou "executar".
     """
@@ -3039,7 +3103,7 @@ def _hermes_handler(args: dict, **kwargs) -> str:  # noqa: ARG001
 _HERMES_SCHEMA = {
     "name": "conciliar_dia_valenlub",
     "description": (
-        "Concilia o caixa 4 ValenLub no dia informado (skill 1.38.2). "
+        "Concilia o caixa 4 ValenLub no dia informado (skill 1.38.3). "
         "Lê OFX, GET Query contas-receber/contas-a-pagar, decide GRAVAR/ARIADNA, "
         "executa ou simula, gera PDF no visual aprovado."
     ),

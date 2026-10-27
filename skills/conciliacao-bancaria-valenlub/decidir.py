@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decide a conciliação. O agente não escolhe. Fonte: skill 1.38.2."""
+"""Decide a conciliação. O agente não escolhe. Fonte: skill 1.38.3."""
 import json
 import re
 import sys
@@ -65,7 +65,7 @@ def _parts_dia(s):
 
 
 def mesmo_dia_quando_ha(linha_data, tit_data):
-    """Data do título obrigatória (skill 1.38.2). Sem data → não casa."""
+    """Data do título obrigatória (skill 1.38.3). Sem data → não casa."""
     if not (tit_data or "").strip():
         return False
     if not (linha_data or "").strip():
@@ -111,7 +111,7 @@ def pares_cartao(ext, rec):
 
 
 def decidir(ext, rec, pag):
-    """Aplica a skill 1.38.2. Retorna lista de linhas com veredito/acao/id."""
+    """Aplica a skill 1.38.3. Retorna lista de linhas com veredito/acao/id."""
     desdobra = pares_cartao(ext, rec)
     out = []
     for i, linha in enumerate(ext):
@@ -128,7 +128,8 @@ def decidir(ext, rec, pag):
                     "veredito": "GRAVAR",
                     "acao": (
                         "Lote. Não procure um título neste valor. "
-                        "Selecione os recebimentos do dia. Desmarque cartão. "
+                        "Selecione TODOS os recebimentos que iniciam com PAGTO "
+                        "(retorno de boletos). Desmarque cartão. "
                         "Se a soma bater no centavo, ligue."
                     ),
                 }
@@ -148,7 +149,7 @@ def decidir(ext, rec, pag):
             )
             continue
         if classe == "rentabilidade":
-            # Skill 1.38.2: criar e baixar (GRAVAR). Nunca Pix/ARIADNA.
+            # Skill 1.38.3: criar e baixar (GRAVAR). Nunca Pix/ARIADNA.
             out.append(
                 {
                     **linha,
@@ -162,7 +163,7 @@ def decidir(ext, rec, pag):
             )
             continue
         if classe == "aplicacao":
-            # Skill 1.38.2: 1200 Mais despesa, 30060005, GRAVAR. Nunca ARIADNA.
+            # Skill 1.38.3: 1200 Mais despesa, 30060005, GRAVAR. Nunca ARIADNA.
             out.append(
                 {
                     **linha,
@@ -285,6 +286,19 @@ def decidir(ext, rec, pag):
                     }
                 )
                 continue
+        # Ariadna 2026-10-27: Pix já baixado fica disponível no valor — ligue.
+        if classe == "pix":
+            out.append(
+                {
+                    **linha,
+                    "veredito": "GRAVAR",
+                    "acao": (
+                        "Pix já baixado. Ligue pelo valor na central do caixa. "
+                        "Não é falta de título se a baixa já foi feita."
+                    ),
+                }
+            )
+            continue
         out.append(
             {
                 **linha,
