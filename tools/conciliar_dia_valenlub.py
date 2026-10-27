@@ -894,6 +894,8 @@ def carregar_query(
     dt_ini = data
     dia = datetime.strptime(data, "%Y-%m-%d")
     dt_fim = (dia + timedelta(days=1)).strftime("%Y-%m-%d")
+    # +2d no fim suplementar: títulos com venc/cob no dia seguinte (UTC) entram
+    supl_fim = (dia + timedelta(days=2)).strftime("%Y-%m-%d")
     venc_ini = (dia - timedelta(days=45)).strftime("%Y-%m-%d")
     cob_ini = (dia - timedelta(days=7)).strftime("%Y-%m-%d")
     receber_parts: list[list[dict]] = []
@@ -931,7 +933,7 @@ def carregar_query(
             extra_params={
                 "statusCobranca": "Aberto,Pago",
                 "dt_vencimento_inicio": venc_ini,
-                "dt_vencimento_fim": dt_fim,
+                "dt_vencimento_fim": supl_fim,
                 "include": "pessoa",
                 "per_page": 100,
             },
@@ -946,7 +948,7 @@ def carregar_query(
             extra_params={
                 "statusCobranca": "Aberto,Pago",
                 "dt_vencimento_inicio": cob_ini,
-                "dt_vencimento_fim": dt_fim,
+                "dt_vencimento_fim": supl_fim,
                 "include": "pessoa",
                 "per_page": 100,
             },
@@ -963,7 +965,7 @@ def carregar_query(
             extra_params={
                 "statusCobranca": "Aberto,Pago",
                 "dt_cobranca_inicio": cob_ini,
-                "dt_cobranca_fim": dt_fim,
+                "dt_cobranca_fim": supl_fim,
                 "include": "pessoa",
                 "per_page": 100,
             },
@@ -3402,6 +3404,8 @@ def conciliar_dia_valenlub(
                 "nome": a.get("nome"),
                 "classe": a.get("classe"),
                 "acao": a.get("acao"),
+                "id": a.get("id"),
+                "ids": a.get("ids"),
             }
             for a in ariadna
         ],
