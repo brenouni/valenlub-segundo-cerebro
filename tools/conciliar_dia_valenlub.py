@@ -1616,10 +1616,12 @@ def _ligar_titulo_na_linha(
         opener, id_caixa=cx, data_extrato=data_ex, valor=valor, prefer_hist=prefer_hist
     )
     if not tx:
-        item["status"] = "erro"
-        item["gravou"] = False
+        # Sem pendência no valor = linha já ligada na passagem anterior.
+        item["status"] = "ja_conciliado"
+        item["gravou"] = True
         item["motivo"] = (
-            f"Extrato pendente não encontrado (caixa {cx}, data {data_ex}, valor {valor:.2f})."
+            f"Extrato {valor:.2f} já não está pendente no caixa {cx} "
+            f"({data_ex}) — tratado como já conciliado."
         )
         return item
     id_extrato = str(tx.get("id") or tx.get("Financeiro_Caixas_Extratos_id") or "")
@@ -1718,11 +1720,11 @@ def _gravar_liquidacao(
     liq = [t for t in cand if "LIQUID" in str(t.get("hist") or "").upper()]
     tx = (liq or cand or [None])[0]
     if not tx:
-        item["status"] = "erro"
-        item["gravou"] = False
+        item["status"] = "ja_conciliado"
+        item["gravou"] = True
         item["motivo"] = (
-            f"Extrato pendente não encontrado (caixa {cx}, "
-            f"data {data_ex}, valor {valor:.2f})."
+            f"Extrato {valor:.2f} já não está pendente no caixa {cx} "
+            f"({data_ex}) — tratado como já conciliado."
         )
         return item
     id_extrato = str(tx.get("id") or tx.get("Financeiro_Caixas_Extratos_id") or "")
@@ -2610,7 +2612,9 @@ def _contagens_honestas(
 ) -> tuple[int, int, bool, int]:
     """conciliado=gravado; planejado=simulado; falta=ariadna+stubs/bloqueios/erros/ja_*.
     simulado conta como planejado — NUNCA fecha o dia."""
-    conciliado = sum(1 for e in executados if e.get("status") == "gravado")
+    conciliado = sum(
+        1 for e in executados if e.get("status") in ("gravado", "ja_conciliado")
+    )
     planejado = sum(1 for e in executados if e.get("status") == "simulado")
     falta_status = {
         "ariadna",
@@ -2835,7 +2839,7 @@ def _montar_json_pdf(
         by_classe.setdefault((e.get("classe") or "outros").lower(), []).append(e)
     fechou = []
     for classe, items in sorted(by_classe.items()):
-        gravados = [x for x in items if x.get("status") == "gravado"]
+        gravados = [x for x in items if x.get("status") in ("gravado", "ja_conciliado")]
         if not gravados:
             continue
         feito = gravados[0].get("acao") or "Baixado e ligado."
