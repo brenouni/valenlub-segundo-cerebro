@@ -2520,10 +2520,23 @@ def _executar_gravar(
                         if (x.get("classe") or "").lower() == "cartao"
                         and str(x.get("id") or "") == str(tid)
                     )
-                    if (
-                        "desdobre" in acao.lower()
-                        or n_mesmo >= 2
-                        or (tit_valor is not None and abs(v - tit_valor) > 0.02)
+                    cielo_ok = (
+                        "cielo" in acao.lower()
+                        or "ligue no líquido" in acao.lower()
+                        or "ligue no liquido" in acao.lower()
+                        or ln.get("cielo_bruto") is not None
+                    )
+                    if "desdobre" in acao.lower() or n_mesmo >= 2:
+                        item["tipo"] = "cartao_bloqueio_desdobro"
+                        item["status"] = "bloqueio_desdobro"
+                        item["motivo"] = (
+                            "Cartão desdobrado — não ligar pedaço; desdobrar na tela."
+                        )
+                        item["id_titulo"] = tid
+                    elif (
+                        tit_valor is not None
+                        and abs(v - tit_valor) > 0.02
+                        and not cielo_ok
                     ):
                         item["tipo"] = "cartao_bloqueio_desdobro"
                         item["status"] = "bloqueio_desdobro"
@@ -2775,10 +2788,20 @@ def _executar_gravar(
                     if (x.get("classe") or "").lower() == "cartao"
                     and str(x.get("id") or "") == str(tid)
                 )
+                cielo_ok = (
+                    "cielo" in acao.lower()
+                    or "ligue no líquido" in acao.lower()
+                    or "ligue no liquido" in acao.lower()
+                    or ln.get("cielo_bruto") is not None
+                )
                 is_desdobro = (
                     "desdobre" in acao.lower()
                     or n_mesmo_id >= 2
-                    or (tit_valor is not None and abs(v - tit_valor) > 0.02)
+                    or (
+                        tit_valor is not None
+                        and abs(v - tit_valor) > 0.02
+                        and not cielo_ok
+                    )
                 )
                 if is_desdobro:
                     item["status"] = "bloqueio_desdobro"
