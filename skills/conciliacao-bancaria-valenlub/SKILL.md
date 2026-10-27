@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
 description: "Conciliação do caixa 4. Anexo sem texto já é o pedido. Tela que fecha não é falta. Tente de novo."
-version: "1.38.3"
+version: "1.38.4"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -12,7 +12,7 @@ metadata:
 
 # Conciliação — ValenLub, caixa 4
 
-Fonte única. Versão 1.38.3. Você não decide. O script decide.
+Fonte única. Versão 1.38.4. Você não decide. O script decide.
 
 Não narrar passo. Não enviar mensagem de progresso. Não diga “Carrego”, “Vou achar”, “O GET veio”, “Rodo a decisão”.
 Só a mensagem final de fechamento (veredito + PDF). Zero narração de passagem.
@@ -31,37 +31,55 @@ Sem arquivo, pare. Responda sem ser marcado.
 2. Devolva só o campo `mensagem` + caminho do PDF. Zero narração. Zero UI.
 3. Não reimplemente GETs, cliques nem `decidir.py` na tela — a tool faz tudo.
 
-## Tool 1.38.3 (produção)
+## Tool 1.38.4 (produção)
 
-A tool `conciliar_dia_valenlub` (1.38.3) é a execução. Não reimplemente na UI o que a tool já faz.
+A tool `conciliar_dia_valenlub` (1.38.4) é a execução. Não reimplemente na UI o que a tool já faz.
 
-- GET paginado com `dt_baixa_ini` = dia e `dt_baixa_fim` = dia seguinte. Cache em `cache/conciliacao/`.
-- Gate 0/1/N (aplicação 30060005, tarifa 30060001, resgate/rentabilidade 30060006): 0 cria, 1 só liga, ≥2 bloqueia (estorno). Data do título obrigatória para casar; fallback valor+dia se plano+hist vazios.
+- GET paginado: (1) `dt_baixa` do dia; (2) suplementar `statusCobranca=Aberto,Pago` por vencimento (~45d) e cobrança (~7d). Merge por id. Cache em `cache/conciliacao/`.
+- Gate 0/1/N (aplicação 30060005, tarifa 30060001, resgate/rentabilidade 30060006): 0 cria, 1 só liga, ≥2 bloqueia. Mensagem lista **manter** (id mais antigo) e **estornar** (demais) na 1200/1100. Tool NÃO estorna.
 - Depois de criar, parse do id + `conciliar` com `prefer_hist` (APLIC/TARIFA/RESGATE).
-- Cartão / Pix / boleto com id: POST `conciliar` (não stub). Desdobro (valor linha ≠ título ou acao Desdobre) → `bloqueio_desdobro`, não liga pedaço. Pix já pago sem movimento → `ja_pago_painel`.
-- PDF/mensagem: `conciliado` = só `gravado`; `planejado` = `simulado` (não fecha); `falta` inclui stub/bloqueio/desdobro/erro/ja_*; fechado só se falta=0, planejado=0 e conciliado≥1.
+- Cartão: casa líquido ±0,02 ou bruto Cielo (CSV). **Sem fallback 5%**. Desdobro só com evidência Cielo/parcela ou acao Desdobre. N títulos → 1 OFX (±0,02) = agregação (multi-id).
+- Pix / DEPOSIT TED: título Pago → liga; título **Aberto** → ARIADNA com id (baixar 1100 na tela; tool não inventa baixa de cliente). Sem título → tenta ligar pelo valor; senão ARIADNA.
+- Débito `PAGTO ELETRON` / cobrança saída → classe `pagar` (AP por valor); não lote PAGTO crédito.
+- PDF/mensagem: `conciliado` = só `gravado`; `planejado` = `simulado`; `falta` inclui stub/bloqueio/desdobro/erro/ja_*; fechado só se falta=0, planejado=0 e conciliado≥1.
 - Só a mensagem final + PDF. Zero narração de passagem.
 
 ## Exceção — tool não fechou
 
 Só se a tool devolver `erro`/`stub_noop`/`bloqueio_*` e Breno pedir tela: uma aba, refazer a linha, conferir Conciliado. Não narrar o meio. Não invente UI no happy path.
 
-## Cartão desdobrado
+## Cartão desdobrado (humano)
 
-A Cielo junta. O banco separa.
+A Cielo junta. O banco separa — ou o inverso (N Cielo → 1 banco).
 Duas linhas do banco somam um título: a tool marca `bloqueio_desdobro` (não liga pedaço no título inteiro).
-Desdobrar na tela (dois valores, soma no centavo) e só então religar.
+**Desdobrar na tela** (dois valores, soma no centavo) e só então religar.
 Linha com título no mesmo valor (±0,02): a tool liga.
-Pago no bruto, diferença = taxa: ligue no líquido. Não edite.
+Pago no bruto Cielo, diferença = taxa: ligue no líquido. Não edite.
+Parcela Elo/bandeira cujo título é a venda inteira (ex. 3239 vs líquido 776,47): desdobro na tela; não usar “quase 5%”.
 
-## Lote de boleto
+## Agregação cartão (N→1)
+
+Três (ou N) DEB/CCR Cielo somam um crédito OFX: a tool tenta multi-id. Se títulos Abertos, baixe antes (1100/tela) e rode de novo.
+
+## Lote de boleto (crédito)
 
 Não procure um título no valor da linha.
 Selecione TODOS os recebimentos que **iniciam com `PAGTO`** (retorno de boletos). Desmarque cartão.
 Soma bate no centavo: ligue.
-Painel sem PAGTO de boleto, ou soma dos boletos Pago no dia diferente da linha do banco: vai para a Ariadna. Não force. Não ligue parcial. Não volte.
+Painel sem PAGTO de boleto, ou soma diferente: Ariadna. Não force. Não ligue parcial.
 
-Pix do extrato já baixado: ligue pelo valor na central. Não marque como falta de título se a baixa já foi feita.
+## Débito PAGTO ELETRON / cobrança (AP)
+
+Não é liquidação de boleto crédito. Ache o AP no valor (±0,02) e ligue. 0 AP → Ariadna 1200.
+
+## Pix Aberto / DEPOSIT cliente
+
+Se o GET achar título **Aberto** no valor: devolva o **id** e peça baixa 1100 (Receber Pagamento) — não inventar `receber_transaction` de cliente.
+Se **Pago**: ligue. Pix já baixado sem id no GET: tente ligar pelo valor na central.
+
+## Tarifa duplicada (humano)
+
+Gate ≥2: manter o id mais antigo; **estornar** os mais novos na 1200. Tool NÃO estorna — só orienta ids.
 
 ## Resgate — lançar e baixar
 
@@ -101,7 +119,9 @@ Histórico (nome/memo) decide a classe. Ordem importa.
 - `RESGATE` / `RESG.` → **resgate** (GRAVAR 1100)
 - `CIELO` / cartão → **cartao**
 - `APLIC.INVEST FACIL` / `APLICACAO` / `APLIC.` / `APLIC ` → **aplicacao** (GRAVAR 1200)
-- Tarifa / boleto / liquidação → classes próprias
+- Tarifa / boleto crédito / liquidação → classes próprias
+- `PAGTO ELETRON` / cobrança a débito → **pagar** (AP)
+- `DEPOSIT TRANSFER` / TED recebida → **deposito** (casa título cliente; não `outros`)
 - Pix só se `PIX` no histórico/memo (CREDIT/DEP sozinho ≠ pix)
 
 ## Demais
@@ -113,5 +133,7 @@ Aplicação (`APLIC.INVEST FACIL` / `APLICACAO` / `APLIC.`): GRAVAR 1200 (ver se
 ## Não fazer
 
 Não estorna. Não grava DNI. Não edite título Pago. Não escolha entre vários.
-Não procure um título no valor do lote.
+Não procure um título no valor do lote de boleto crédito.
+Não use fallback “≈5%” em cartão.
+Não invente baixa 1100 de Pix/DEP de cliente (só ARIADNA com id).
 Não entregue o dia com GRAVAR em aberto.

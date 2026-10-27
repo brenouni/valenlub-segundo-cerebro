@@ -1,7 +1,7 @@
 ---
 name: query-recorte
-description: "Lê Query. Não é conciliação. A rotina vive na skill 1.38.3."
+description: "Lê Query. Não é conciliação. A rotina vive na skill 1.38.4."
 ---
 
 Esta skill não concilia.
-Conciliação: skill 1.38.3.
+Conciliação: skill 1.38.4.

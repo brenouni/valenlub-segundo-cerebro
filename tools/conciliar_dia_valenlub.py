@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conciliação do caixa 4 ValenLub — skill 1.38.3.
+"""Conciliação do caixa 4 ValenLub — skill 1.38.4.
 
 Função principal: conciliar_dia_valenlub(...)
 
@@ -207,6 +207,16 @@ def _classify_line(nome: str, memo: str = "", trntype: str = "") -> str:
         )
     ):
         return "tarifa"
+    # Débito PAGTO ELETRON ANTES de boleto/COBRANCA (senão cai em lote PAGTO crédito)
+    if any(
+        k in blob_n
+        for k in (
+            "PAGTO ELETRON",
+            "PAGAMENTO ELETRON",
+            "PAGTO ELETRONICO",
+        )
+    ):
+        return "pagar"
     if any(
         k in blob_n
         for k in (
@@ -224,6 +234,19 @@ def _classify_line(nome: str, memo: str = "", trntype: str = "") -> str:
         return "boleto"
     if "PIX" in blob_n:
         return "pix"
+    # TED/DEP do cliente (não Pix)
+    if any(
+        k in blob_n
+        for k in (
+            "DEPOSIT TRANSFER",
+            "DEPOSITO TRANSFER",
+            "TED RECEB",
+            "TED CREDIT",
+            "TRANSFERENCIA RECEB",
+            "DOC RECEB",
+        )
+    ):
+        return "deposito"
     # CREDIT/DEP sozinho NÃO é Pix — exige PIX no histórico/memo.
     if trntype.upper() in ("DEBIT", "XFER", "PAYMENT"):
         return "outros"
@@ -374,11 +397,34 @@ def ler_cielo_csv(path: str | None) -> list[dict[str, Any]]:
 def enriquecer_cartao_com_cielo(
     extrato: list[dict[str, Any]], cielo: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Anexa líquido/taxa Cielo nas linhas de cartão (match por líquido ±0,02)."""
+    """Anexa líquido/taxa Cielo nas linhas de cartão.
+
+    1:1 por líquido ±0,02; se falhar, tenta N linhas Cielo cuja soma de líquidos
+    feche o OFX (agregação inversa ao desdobro).
+    """
     if not cielo:
         return extrato
     usados: set[int] = set()
     out: list[dict[str, Any]] = []
+
+    def _subset_cielo(alvo: float, livres: list[int], max_n: int = 5) -> list[int] | None:
+        from itertools import combinations
+        pool = []
+        for i in livres:
+            liq = cielo[i].get("liquido")
+            if liq is None:
+                continue
+            lv = round(float(liq), 2)
+            if 0 < lv <= alvo + 0.02:
+                pool.append((i, lv))
+        if len(pool) > 24:
+            pool = pool[:24]
+        for n in range(2, min(max_n, len(pool)) + 1):
+            for combo in combinations(pool, n):
+                if abs(round(sum(v for _, v in combo), 2) - alvo) <= 0.02:
+                    return [i for i, _ in combo]
+        return None
+
     for ln in extrato:
         item = dict(ln)
         if (item.get("classe") or "").lower() != "cartao":
@@ -395,14 +441,38 @@ def enriquecer_cartao_com_cielo(
             if abs(round(float(liq), 2) - v) <= 0.02:
                 match_i = i
                 break
-        if match_i is None:
+        if match_i is not None:
+            usados.add(match_i)
+            c = cielo[match_i]
+            item["cielo_liquido"] = c.get("liquido")
+            item["cielo_taxa"] = c.get("taxa")
+            item["cielo_bruto"] = c.get("bruto")
             out.append(item)
             continue
-        usados.add(match_i)
-        c = cielo[match_i]
-        item["cielo_liquido"] = c.get("liquido")
-        item["cielo_taxa"] = c.get("taxa")
-        item["cielo_bruto"] = c.get("bruto")
+        livres = [i for i in range(len(cielo)) if i not in usados]
+        idxs = _subset_cielo(v, livres)
+        if idxs:
+            usados.update(idxs)
+            rows = [cielo[i] for i in idxs]
+            item["cielo_agregados"] = [
+                {
+                    "liquido": r.get("liquido"),
+                    "bruto": r.get("bruto"),
+                    "taxa": r.get("taxa"),
+                }
+                for r in rows
+            ]
+            item["cielo_liquido"] = round(
+                sum(float(r.get("liquido") or 0) for r in rows), 2
+            )
+            item["cielo_bruto"] = round(
+                sum(float(r.get("bruto") or 0) for r in rows), 2
+            )
+            item["cielo_taxa"] = round(
+                sum(float(r.get("taxa") or 0) for r in rows), 2
+            )
+            out.append(item)
+            continue
         out.append(item)
     return out
 
@@ -593,11 +663,21 @@ def _normalize_titulos(payload: Any) -> list[dict[str, Any]]:
             or t.get("codigo")
             or t.get("nrTitulo")
         )
+        st = (
+            t.get("statusCobranca")
+            or t.get("status")
+            or t.get("situacao")
+            or ""
+        )
+        if not tid:
+            tid = t.get("idCobrancaReceber") or t.get("idCobrancaPagar")
         out.append(
             {
                 "id": tid,
                 "valor": _parse_ofx_amount(str(valor)),
                 "nome": str(nome or ""),
+                "status": str(st or ""),
+                "statusCobranca": str(st or ""),
                 "raw": t,
             }
         )
@@ -609,23 +689,29 @@ def query_get_titulos(
     token: str,
     tenant: str,
     endpoint: str,
-    dt_baixa_fim: str,
+    dt_baixa_fim: str | None = None,
     caixa: int | None = None,
     dt_baixa_ini: str | None = None,
     *,
     return_raw: bool = False,
+    extra_params: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], Any]:
-    """GET títulos com janela de baixa e paginação defensiva."""
-    params: dict[str, Any] = {"dt_baixa_fim": dt_baixa_fim}
+    """GET títulos com filtros (baixa e/ou vencimento/status) e paginação."""
+    params: dict[str, Any] = {}
+    if dt_baixa_fim:
+        params["dt_baixa_fim"] = dt_baixa_fim
+        params["dtBaixaFim"] = dt_baixa_fim
+        params["dt_baixa_fim"] = dt_baixa_fim
     if dt_baixa_ini:
         params["dt_baixa_ini"] = dt_baixa_ini
         params["dtBaixaIni"] = dt_baixa_ini
         params["dt_baixa_inicio"] = dt_baixa_ini
-    params["dtBaixaFim"] = dt_baixa_fim
     if caixa is not None:
         params["caixa"] = caixa
         params["id_caixa"] = caixa
         params["idCaixa"] = caixa
+    if extra_params:
+        params.update(extra_params)
 
     def _fetch(p: dict[str, Any]) -> Any:
         url = f"{base.rstrip('/')}/{endpoint.lstrip('/')}?{urlencode(p)}"
@@ -757,6 +843,21 @@ def _dump_json(path: Path, obj: Any) -> None:
         pass
 
 
+def _merge_titulos(*listas: list[dict]) -> list[dict]:
+    """Une listas de títulos por id (primeira ocorrência vence)."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for lst in listas:
+        for t in lst or []:
+            tid = str(t.get("id") or "")
+            key = tid or f"{t.get('valor')}|{t.get('nome')}|{len(out)}"
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(t)
+    return out
+
+
 def carregar_query(
     data: str,
     caixa: int,
@@ -766,8 +867,9 @@ def carregar_query(
     """GETs read-only. Retorna (receber, pagar, avisos).
 
     Exige QUERY_TENANT e (QUERY_TOKEN ou QUERY_USER+QUERY_PASS).
-    Não pula GET em silêncio — chame _query_creds_missing() antes.
-    Pagina até esgotar. dt_baixa_ini = data do dia; dt_baixa_fim = dia seguinte.
+    Skill 1.38.4: além da janela dt_baixa do dia, busca suplementar
+    statusCobranca=Aberto,Pago por vencimento (~45d) e cobrança (~7d)
+    para achar CCR Pago com dtBaixa=null e Pix/DEP Abertos.
     """
     _ensure_env()
     avisos: list[str] = []
@@ -790,25 +892,89 @@ def carregar_query(
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"Login Query falhou: {exc}") from exc
     dt_ini = data
-    dt_fim = (datetime.strptime(data, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-    receber: list[dict] = []
-    pagar: list[dict] = []
+    dia = datetime.strptime(data, "%Y-%m-%d")
+    dt_fim = (dia + timedelta(days=1)).strftime("%Y-%m-%d")
+    venc_ini = (dia - timedelta(days=45)).strftime("%Y-%m-%d")
+    cob_ini = (dia - timedelta(days=7)).strftime("%Y-%m-%d")
+    receber_parts: list[list[dict]] = []
+    pagar_parts: list[list[dict]] = []
     receber_raw: Any = None
     pagar_raw: Any = None
+
+    def _get(endpoint: str, **kw):
+        return query_get_titulos(base, token, tenant, endpoint, **kw)
+
+    # 1) baixa do dia (já baixados no caixa)
     try:
-        receber, receber_raw = query_get_titulos(
-            base, token, tenant, "contas-receber", dt_fim, caixa,
+        rec, receber_raw = _get(
+            "contas-receber", dt_baixa_fim=dt_fim, caixa=caixa,
             dt_baixa_ini=dt_ini, return_raw=True,
+            extra_params={"include": "pessoa"},
         )
+        receber_parts.append(rec)
     except Exception as exc:  # noqa: BLE001
-        avisos.append(f"GET contas-receber falhou: {exc}")
+        avisos.append(f"GET contas-receber (baixa) falhou: {exc}")
     try:
-        pagar, pagar_raw = query_get_titulos(
-            base, token, tenant, "contas-a-pagar", dt_fim, caixa,
+        pag, pagar_raw = _get(
+            "contas-a-pagar", dt_baixa_fim=dt_fim, caixa=caixa,
             dt_baixa_ini=dt_ini, return_raw=True,
+            extra_params={"include": "pessoa"},
         )
+        pagar_parts.append(pag)
     except Exception as exc:  # noqa: BLE001
-        avisos.append(f"GET contas-a-pagar falhou: {exc}")
+        avisos.append(f"GET contas-a-pagar (baixa) falhou: {exc}")
+
+    # 2) Aberto,Pago por vencimento (cartão Pago sem dtBaixa, AP, parcelas)
+    try:
+        rec2, _ = _get(
+            "contas-receber", return_raw=True,
+            extra_params={
+                "statusCobranca": "Aberto,Pago",
+                "dt_vencimento_inicio": venc_ini,
+                "dt_vencimento_fim": dt_fim,
+                "include": "pessoa",
+                "per_page": 100,
+            },
+        )
+        receber_parts.append(rec2)
+        avisos.append(f"GET receber suplementar vencimento: {len(rec2)} títulos")
+    except Exception as exc:  # noqa: BLE001
+        avisos.append(f"GET contas-receber (vencimento) falhou: {exc}")
+    try:
+        pag2, _ = _get(
+            "contas-a-pagar", return_raw=True,
+            extra_params={
+                "statusCobranca": "Aberto,Pago",
+                "dt_vencimento_inicio": cob_ini,
+                "dt_vencimento_fim": dt_fim,
+                "include": "pessoa",
+                "per_page": 100,
+            },
+        )
+        pagar_parts.append(pag2)
+        avisos.append(f"GET pagar suplementar vencimento: {len(pag2)} títulos")
+    except Exception as exc:  # noqa: BLE001
+        avisos.append(f"GET contas-a-pagar (vencimento) falhou: {exc}")
+
+    # 3) receber por dt_cobranca recente (Pix/DEP Abertos emitidos no período)
+    try:
+        rec3, _ = _get(
+            "contas-receber", return_raw=True,
+            extra_params={
+                "statusCobranca": "Aberto,Pago",
+                "dt_cobranca_inicio": cob_ini,
+                "dt_cobranca_fim": dt_fim,
+                "include": "pessoa",
+                "per_page": 100,
+            },
+        )
+        receber_parts.append(rec3)
+        avisos.append(f"GET receber suplementar cobranca: {len(rec3)} títulos")
+    except Exception as exc:  # noqa: BLE001
+        avisos.append(f"GET contas-receber (cobranca) falhou: {exc}")
+
+    receber = _merge_titulos(*receber_parts)
+    pagar = _merge_titulos(*pagar_parts)
     if dump_prefix:
         cdir = _cache_dir()
         _dump_json(cdir / f"{dump_prefix}-receber-raw.json", receber_raw)
@@ -1879,8 +2045,10 @@ def _data_do_titulo(t: dict) -> str:
         for k in (
             "dtBaixa",
             "dt_baixa",
+            "dtCobrancaReceberBaixa",
             "dtCobrancaPagarBaixa",
             "dtCobrancaReceberRecebimento",
+            "dtCobrancaReceber",
             "dtVencimentoCobrancaPagar",
             "dtVencimentoCobrancaReceber",
             "dtVencimento",
@@ -2192,12 +2360,23 @@ def _decidir_gate_pool(
 
     # 1 OFX + >=2 títulos livres → ambíguo, não escolher
     if n_ofx <= 1 and m_livres >= 2:
-        ids = [_titulo_id(t) for t in livres]
+        def _id_num(t):
+            tid = _titulo_id(t)
+            try:
+                return (0, int(tid))
+            except (TypeError, ValueError):
+                return (1, tid)
+        ordenados = sorted(livres, key=_id_num)
+        manter = _titulo_id(ordenados[0])
+        estornar = [_titulo_id(t) for t in ordenados[1:]]
+        ids = [_titulo_id(t) for t in ordenados]
         return (
             "bloqueio",
             None,
             f"Vários {plano_label} no valor/dia ({', '.join(ids)}) — "
-            f"1 linha OFX e {m_livres} títulos; estornar duplicado na {tela_estorno}.",
+            f"1 linha OFX e {m_livres} títulos; manter {manter}; "
+            f"estornar na {tela_estorno}: {', '.join(estornar)}. "
+            "Tool NÃO estorna.",
         )
 
     # N OFX + M títulos: consumir 1:1
@@ -2313,8 +2492,17 @@ def _executar_gravar(
                     criados.append({**item, "tipo": "receita_avulsa_seria_criada"})
             elif classe in ("liquidacao", "boleto"):
                 item["tipo"] = "lote_boleto_seria_conciliado"
-            elif classe in ("cartao", "pix"):
-                if classe == "cartao" and ln.get("id"):
+            elif classe == "pagar":
+                if ln.get("id"):
+                    item["tipo"] = "ap_seria_ligado"
+                    item["id_titulo"] = ln.get("id")
+                else:
+                    item["tipo"] = "ap_sem_titulo"
+            elif classe in ("cartao", "pix", "deposito"):
+                if classe == "cartao" and ln.get("ids") and len(ln.get("ids") or []) > 1:
+                    item["tipo"] = "cartao_agregacao_seria_ligada"
+                    item["ids_titulos"] = list(ln.get("ids") or [])
+                elif classe == "cartao" and ln.get("id"):
                     acao = str(ln.get("acao") or "")
                     v = abs(float(ln.get("valor") or 0))
                     tid = ln.get("id")
@@ -2342,10 +2530,12 @@ def _executar_gravar(
                         item["motivo"] = (
                             "Cartão desdobrado — não ligar pedaço; desdobrar na tela."
                         )
+                        item["id_titulo"] = tid
                     else:
                         item["tipo"] = "cartao_seria_ligado"
                 elif ln.get("id"):
                     item["tipo"] = f"{classe}_seria_ligado"
+                    item["id_titulo"] = ln.get("id")
                 else:
                     item["tipo"] = f"{classe}_sem_titulo"
             executados.append(item)
@@ -2354,7 +2544,7 @@ def _executar_gravar(
         try:
             if classe in (
                 "aplicacao", "tarifa", "resgate", "rentabilidade",
-                "liquidacao", "boleto", "cartao", "pix",
+                "liquidacao", "boleto", "cartao", "pix", "deposito", "pagar",
             ):
                 _need_session()
 
@@ -2469,7 +2659,97 @@ def _executar_gravar(
                 executados.append(item)
                 continue
 
+            if classe == "pagar":
+                tid = ln.get("id")
+                v = abs(float(ln.get("valor") or 0))
+                if not tid:
+                    item["status"] = "stub_noop"
+                    item["gravou"] = False
+                    item["motivo"] = f"Débito AP {v:.2f} sem id — Ariadna 1200."
+                    executados.append(item)
+                    continue
+                item = _ligar_titulo_na_linha(
+                    opener, item, ln,
+                    id_caixa=cx,
+                    id_titulo=str(tid),
+                    tp="Debito",
+                    prefer_hist=("PAGTO", "ELETRON", "COBRANCA", "BOLETO"),
+                )
+                item["tipo"] = "ap_ligado"
+                item["id_titulo"] = tid
+                executados.append(item)
+                continue
+
             if classe == "cartao":
+                tids = [str(x) for x in (ln.get("ids") or []) if x]
+                if len(tids) > 1:
+                    v = abs(float(ln.get("valor") or 0))
+                    dia = _data_linha(ln)
+                    tx = _achar_extrato_por_valor(
+                        opener, id_caixa=cx, data_extrato=dia, valor=v,
+                        prefer_hist=("CIELO", "CARTAO", "VISA", "MASTER", "ELO"),
+                    )
+                    if not tx:
+                        item["status"] = "erro"
+                        item["gravou"] = False
+                        item["ids_titulos"] = tids
+                        item["motivo"] = (
+                            f"Agregação cartão {v:.2f}: extrato pendente não achado; "
+                            f"ids {', '.join(tids)}."
+                        )
+                        executados.append(item)
+                        continue
+                    id_extrato = str(
+                        tx.get("id") or tx.get("Financeiro_Caixas_Extratos_id") or ""
+                    )
+                    mov_ids = _achar_mov_ids(
+                        opener, id_caixa=cx, data_extrato=dia, valor=v,
+                        tp="Credito", prefer_mesmo_dia=True,
+                    )
+                    if not mov_ids:
+                        pool: list[str] = []
+                        for mid_t in tids:
+                            ids_one = _achar_mov_ids(
+                                opener, id_caixa=cx, data_extrato=dia,
+                                valor=v, tp="Credito", id_titulo=str(mid_t),
+                            )
+                            if ids_one:
+                                pool.extend(ids_one)
+                        mov_ids = list(dict.fromkeys(pool)) or None
+                    if not mov_ids:
+                        item["status"] = "erro"
+                        item["gravou"] = False
+                        item["ids_titulos"] = tids
+                        item["id_extrato"] = id_extrato
+                        item["motivo"] = (
+                            f"Agregação: títulos {', '.join(tids)} — "
+                            "sem movimentação para ligar (baixe se Aberto)."
+                        )
+                        executados.append(item)
+                        continue
+                    resp = query_conciliar_lote(
+                        opener, id_extrato=id_extrato, ids_movimentacao=mov_ids
+                    )
+                    ok = False
+                    try:
+                        js = json.loads(resp)
+                        ok = bool(js.get("isOk")) or "sucesso" in str(
+                            js.get("message") or ""
+                        ).lower()
+                        item["resposta"] = json.dumps(js, ensure_ascii=False)[:300]
+                    except json.JSONDecodeError:
+                        ok = "[Sucesso]" in resp or "sucesso" in resp.lower()
+                        item["resposta"] = (resp or "")[:300]
+                    item["status"] = "gravado" if ok else "erro"
+                    item["gravou"] = ok
+                    item["tipo"] = "cartao_agregacao_ligada"
+                    item["ids_titulos"] = tids
+                    item["id_extrato"] = id_extrato
+                    item["ids_movimentacao"] = mov_ids
+                    if not ok:
+                        item["motivo"] = "Agregação cartão sem isOk."
+                    executados.append(item)
+                    continue
                 tid = ln.get("id")
                 v = abs(float(ln.get("valor") or 0))
                 acao = str(ln.get("acao") or "")
@@ -2522,7 +2802,7 @@ def _executar_gravar(
                 executados.append(item)
                 continue
 
-            if classe == "pix":
+            if classe in ("pix", "deposito"):
                 tid = ln.get("id")
                 v = abs(float(ln.get("valor") or 0))
                 dia = _data_linha(ln)
@@ -2599,7 +2879,7 @@ def _executar_gravar(
         item["gravou"] = False
         item["motivo"] = (
             "AVISO: modo executar — escrita implementada para aplicacao, "
-            "tarifa, rentabilidade, resgate, liquidacao/boleto, cartao e pix. "
+            "tarifa, rentabilidade, resgate, liquidacao/boleto, cartao, pix, deposito e pagar. "
             f"Classe '{classe}': use a tela."
         )
         executados.append(item)
@@ -2952,7 +3232,7 @@ def conciliar_dia_valenlub(
     cielo_csv_path: str | None = None,
     modo: str = "simular",
 ) -> ResultadoConciliacao:
-    """Concilia o caixa 4 do dia. Skill 1.38.3.
+    """Concilia o caixa 4 do dia. Skill 1.38.4.
 
     modo: "simular" (default) ou "executar".
     """
@@ -3131,7 +3411,7 @@ def _hermes_handler(args: dict, **kwargs) -> str:  # noqa: ARG001
 _HERMES_SCHEMA = {
     "name": "conciliar_dia_valenlub",
     "description": (
-        "Concilia o caixa 4 ValenLub no dia informado (skill 1.38.3). "
+        "Concilia o caixa 4 ValenLub no dia informado (skill 1.38.4). "
         "Lê OFX, GET Query contas-receber/contas-a-pagar, decide GRAVAR/ARIADNA, "
         "executa ou simula, gera PDF no visual aprovado."
     ),
