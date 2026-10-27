@@ -1693,6 +1693,12 @@ def _gravar_liquidacao(
     data_ex = _data_linha(ln)
     valor = abs(float(ln.get("valor") or 0))
     nome = (ln.get("nome") or ln.get("memo") or "").upper()
+    sentido = str(ln.get("sentido") or "").lower()
+    trn = str(ln.get("trntype") or "").upper()
+    is_saida = sentido == "saida" or trn in (
+        "DEBIT", "DEBITO", "D", "PAYMENT", "XFER", "POS", "ATM"
+    )
+    tp_mov = "Debito" if is_saida else "Credito"
     txs = query_extrato_pendente(opener, id_caixa=cx, data_extrato=data_ex)
     # casa por valor ±0,02 e histórico LIQUID* se houver
     cand = []
@@ -1727,18 +1733,21 @@ def _gravar_liquidacao(
         return item
 
     movs = query_movimentacoes_para_alvo(
-        opener, id_caixa=cx, data_extrato=data_ex, valor=valor, tp="Credito"
+        opener, id_caixa=cx, data_extrato=data_ex, valor=valor, tp=tp_mov
     )
-    # skill + Ariadna: só recebimentos que COMEÇAM com PAGTO; desmarque cartão
+    # entrada (liquidação): só PAGTO*; saída (pagto eletrôn): sem filtro PAGTO
     dia_br = _data_br(data_ex)  # DD/MM/YYYY
     filtrados: list[tuple[str, float, str]] = []
     n_pagto = 0
     for m in movs:
         if _eh_cartao_mov(m):
             continue
-        if not _eh_pagto_mov(m):
-            continue
-        n_pagto += 1
+        if not is_saida:
+            if not _eh_pagto_mov(m):
+                continue
+            n_pagto += 1
+        else:
+            n_pagto += 1  # conta candidatos débito
         mid = m.get("idMovimentacao") or m.get("id")
         if mid is None:
             continue
@@ -1756,8 +1765,15 @@ def _gravar_liquidacao(
         item["gravou"] = False
         item["id_extrato"] = id_extrato
         item["motivo"] = (
-            f"Painel sem PAGTO de boleto (movs={len(movs)}, extrato={id_extrato}). "
-            "Ariadna: não force lote sem prefixo PAGTO."
+            (
+                f"Painel sem PAGTO de boleto (movs={len(movs)}, extrato={id_extrato}). "
+                "Ariadna: não force lote sem prefixo PAGTO."
+            )
+            if not is_saida
+            else (
+                f"Sem movimentação a débito para {valor:.2f} "
+                f"(movs={len(movs)}, extrato={id_extrato})."
+            )
         )
         return item
 
@@ -1809,7 +1825,7 @@ def _gravar_liquidacao(
     )
     item["id_extrato"] = id_extrato
     item["ids_movimentacao"] = ids
-    item["filtro"] = "PAGTO*"
+    item["filtro"] = "debito" if is_saida else "PAGTO*"
     if not ok:
         item["motivo"] = "Conciliação sem isOk."
     return item
