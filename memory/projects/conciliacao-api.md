@@ -1,6 +1,6 @@
 # API Query — leitura da conciliação
 
-Não decide baixa. A regra é a skill 1.39.1.
+Não decide baixa. A regra é a skill 1.39.2.
 
 - Base: `https://backend.acessoquery.com/api`
 - Toda chamada: `X-Tenant` + Bearer de `POST /login`.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decide a conciliação. O agente não escolhe. Fonte: skill 1.39.1."""
+"""Decide a conciliação. O agente não escolhe. Fonte: skill 1.39.2."""
 import json
 import re
 import sys
@@ -81,7 +81,7 @@ def _parts_dia(s):
 
 
 def mesmo_dia_quando_ha(linha_data, tit_data):
-    """Data do título obrigatória (skill 1.39.1). Sem data → não casa."""
+    """Data do título obrigatória (skill 1.39.2). Sem data → não casa."""
     if not (tit_data or "").strip():
         return False
     if not (linha_data or "").strip():
@@ -170,7 +170,7 @@ def _pick_nome(cand, nome):
 
 
 def decidir(ext, rec, pag):
-    """Aplica a skill 1.39.1. Retorna lista de linhas com veredito/acao/id."""
+    """Aplica a skill 1.39.2. Retorna lista de linhas com veredito/acao/id."""
     desdobra = pares_cartao(ext, rec)
     out = []
     for i, linha in enumerate(ext):
@@ -258,9 +258,9 @@ def decidir(ext, rec, pag):
                     "veredito": "GRAVAR",
                     "acao": (
                         "Lote. Não procure um título neste valor. "
-                        "Selecione TODOS os recebimentos que iniciam com PAGTO "
-                        "(retorno de boletos). Desmarque cartão. "
-                        "Se a soma bater no centavo, ligue."
+                        "Selecione SOMENTE recebimentos que INICIAM com PAGTO "
+                        "(retorno de boletos). Nunca Pix/CR/RECEBIMENTO DE CARTÃO. "
+                        "Desmarque cartão. Se a soma bater no centavo, ligue."
                     ),
                 }
             )
@@ -345,7 +345,10 @@ def decidir(ext, rec, pag):
                             "id": t.get("id"),
                             "acao": (
                                 f"Título {t.get('id')} {t['valor']} "
-                                f"({status_tit(t) or 'Pago'}). Ligue pelo valor."
+                                f"({status_tit(t) or 'Pago'}). Ligue pelo valor. "
+                                "Se mov não aparecer: CR pode estar preso em "
+                                "liquidação Conciliado — desconciliar "
+                                "estornarTitulo=0, ligar Pix 1:1, religar só PAGTO*."
                             ),
                         }
                     )

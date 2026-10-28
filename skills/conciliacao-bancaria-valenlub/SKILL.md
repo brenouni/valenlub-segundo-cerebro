@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
 description: "Conciliação do caixa 4. Anexo sem texto já é o pedido. Tela que fecha não é falta. Tente de novo."
-version: "1.39.1"
+version: "1.39.2"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -12,7 +12,7 @@ metadata:
 
 # Conciliação — ValenLub, caixa 4
 
-Fonte única. Versão 1.39.1. Você não decide. O script decide.
+Fonte única. Versão 1.39.2. Você não decide. O script decide.
 
 Não narrar passo. Não enviar mensagem de progresso. Não diga “Carrego”, “Vou achar”, “O GET veio”, “Rodo a decisão”.
 Só a mensagem final de fechamento (veredito + PDF). Zero narração de passagem.
@@ -31,9 +31,9 @@ Sem arquivo, pare. Responda sem ser marcado.
 2. Devolva só o campo `mensagem` + caminho do PDF. Zero narração. Zero UI.
 3. Não reimplemente GETs, cliques nem `decidir.py` na tela — a tool faz tudo.
 
-## Tool 1.39.1 (produção)
+## Tool 1.39.2 (produção)
 
-A tool `conciliar_dia_valenlub` (1.39.1) é a execução. Não reimplemente na UI o que a tool já faz.
+A tool `conciliar_dia_valenlub` (1.39.2) é a execução. Não reimplemente na UI o que a tool já faz.
 
 - GET paginado: (1) `dt_baixa` do dia; (2) suplementar `statusCobranca=Aberto,Pago` por vencimento (~45d) e cobrança (~7d). Merge por id. Cache em `cache/conciliacao/`.
 - Gate 0/1/N (aplicação 30060005, tarifa 30060001, resgate/rentabilidade 30060006): 0 cria, 1 só liga, ≥2 bloqueia. Mensagem lista **manter** (id mais antigo) e **estornar** (demais) na 1200/1100. Tool NÃO estorna no fluxo do dia (helpers de desconciliar/estornar/reabrir existem, mas exigem flag explícita).
@@ -93,9 +93,12 @@ Não inventar título 1100 de cartão.
 ## Lote de boleto (crédito)
 
 Não procure um título no valor da linha.
-Selecione TODOS os recebimentos que **iniciam com `PAGTO`** (retorno de boletos). Desmarque cartão.
+Selecione **somente** os recebimentos cujo histórico **inicia com `PAGTO`** (retorno de boletos).
+**Nunca** incluir no lote: Pix, CR avulso, `RECEBIMENTO DE CARTÃO`, Cielo/Master/Amex.
+Desmarque cartão e qualquer mov que não comece com `PAGTO`.
 Soma bate no centavo: ligue.
 Painel sem PAGTO de boleto, ou soma diferente: Ariadna. Não force. Não ligue parcial.
+(Aprendizado 28/10 — dia 19: liquidação 30794 tinha CRs/Pix indevidos; Pix 3484,74 sumiu das movs abertas.)
 
 ## Débito PAGTO ELETRON / cobrança (AP)
 
@@ -103,8 +106,22 @@ Não é liquidação de boleto crédito. Ache o AP no valor (±0,02) e ligue. 0 
 
 ## Pix Aberto / DEPOSIT cliente
 
+Preferência: Pix N=1 → baixa/liga quando possível; cartão Pago 1:1 `RECEBIMENTO DE CARTÃO` → só ligar no líquido (não baixar de novo).
+
 Se o GET achar título **Aberto** no valor: devolva o **id** e peça baixa 1100 (Receber Pagamento) — não inventar `receber_transaction` de cliente.
 Se **Pago**: ligue. Pix já baixado sem id no GET: tente ligar pelo valor na central.
+
+## Mov presa em liquidação (Pix/CR «não aparece»)
+
+Se título **Pago** mas a tool diz «movimento/extrato não aparece» / Sem movimentação: **não** marque Falta/ARIADNA ainda.
+
+1. Cheque se o CR do título está em outra linha **Conciliado** do dia (quase sempre uma **liquidação** com origens indevidas — Pix/cartão misturados no lote PAGTO).
+2. Se sim → `desconciliar` essa liquidação com `estornarTitulo=0` (só solta vínculo; não estorna baixa).
+3. Ligue o Pix/CR **1:1** no extrato certo (Falta).
+4. Religue a liquidação **só com PAGTO*** cuja soma feche o valor do extrato.
+
+A tool no fluxo do dia **não** desliga sozinha (precisa flag `--reabrir-dia` ou ação humana). Em `ja_pago_painel` / Sem movimentação ela aponta liquidação Conciliado suspeita no motivo.
+(Aprendizado 28/10 — dia 19: CR 89292/título 90764 preso na liquidação 30794; extrato Pix 30799 Falta.)
 
 ## Tarifa duplicada (humano)
 
@@ -159,6 +176,18 @@ Centavo: título único até 0,02 é GRAVAR.
 Tarifa: 30060001, caixa 4, data do extrato.
 Aplicação (`APLIC.INVEST FACIL` / `APLICACAO` / `APLIC.`): GRAVAR 1200 (ver seção). Nunca classifique como `outros` nem Pix.
 
+
+## Deploy (obrigatório após pull)
+
+Após `git pull` da skill/tool no VPS, **sempre** reiniciar o gateway — o Python mantém o módulo em memória. SKILL.md no disco ≠ tool carregada.
+
+```bash
+systemctl --user restart hermes-gateway.service
+# prova: PID novo + versão em memória = disco (smoke 1.39.2)
+```
+
+Falha clássica (28/10): disco em 1.39.1, gateway sem restart desde 24/10 → `receber_query` ~50 em vez de ~5040; 9 linhas «sem título».
+
 ## Não fazer
 
 Não estorna no fluxo do dia (só com --reabrir-dia --executar-reabrir). Não grava DNI. Não edite título Pago. Não escolha entre vários.
@@ -166,4 +195,7 @@ Não procure um título no valor do lote de boleto crédito.
 Não use fallback “≈5%” em cartão.
 Não invente baixa 1100 de Pix/DEP de cliente (só ARIADNA com id).
 Não invente baixa 1100 de cartão já pago no painel (só ligar 1:1).
+Não inclua Pix/CR/`RECEBIMENTO DE CARTÃO` no lote de liquidação (só `PAGTO*`).
+Não marque Falta/ARIADNA por «mov não aparece» sem checar se o CR está preso em liquidação Conciliado.
 Não entregue o dia com GRAVAR em aberto.
+Não faça `git pull` da tool sem reiniciar `hermes-gateway.service`.

@@ -2,7 +2,7 @@
 
 ## `conciliar_dia_valenlub`
 
-Conciliação do caixa 4 (skill `conciliacao-bancaria-valenlub` 1.39.0).
+Conciliação do caixa 4 (skill `conciliacao-bancaria-valenlub` 1.39.2).
 
 ```bash
 # na raiz do cérebro
@@ -23,7 +23,7 @@ mkdir -p ~/.hermes/plugins
 ln -sfn /home/hermes/valenlub-segundo-cerebro/hermes-plugin/conciliar-dia-valenlub \
   ~/.hermes/plugins/conciliar-dia-valenlub
 hermes plugins enable conciliar-dia-valenlub
-# reinicie o Hermes / gateway
+# OBRIGATÓRIO: systemctl --user restart hermes-gateway.service (módulo em memória)
 ```
 
 Configure `plugins.entries.conciliar-dia-valenlub.settings.brain_root` se o cérebro não estiver em `/home/hermes/valenlub-segundo-cerebro`.

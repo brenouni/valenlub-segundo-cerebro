@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conciliação do caixa 4 ValenLub — skill 1.39.1.
+"""Conciliação do caixa 4 ValenLub — skill 1.39.2.
 
 Função principal: conciliar_dia_valenlub(...)
 
@@ -871,7 +871,7 @@ def carregar_query(
     """GETs read-only. Retorna (receber, pagar, avisos).
 
     Exige QUERY_TENANT e (QUERY_TOKEN ou QUERY_USER+QUERY_PASS).
-    Skill 1.39.1: além da janela dt_baixa do dia, busca suplementar
+    Skill 1.39.2: além da janela dt_baixa do dia, busca suplementar
     statusCobranca=Aberto,Pago por vencimento (~45d) e cobrança (~7d)
     para achar CCR Pago com dtBaixa=null e Pix/DEP Abertos.
     """
@@ -2042,15 +2042,65 @@ def _hist_mov(m: dict) -> str:
     return ""
 
 
+
+def _suspeita_mov_presa_liquidacao(
+    opener: Any,
+    *,
+    id_caixa: str | int | None,
+    data_extrato: str,
+    id_titulo: str | None = None,
+) -> str:
+    """Hint 1.39.2 (dia 19/10): título Pago sem mov aberta → CR pode estar em liquidação.
+
+    Não muta. Lista liquidação Conciliado do dia para o motivo/ARIADNA.
+    """
+    cx = _caixa_str(id_caixa)
+    try:
+        txs = query_extrato_periodo(opener, id_caixa=cx, data_extrato=data_extrato)
+    except Exception:
+        return ""
+    liqs: list[str] = []
+    for tx in txs:
+        if str(tx.get("status") or "") != "Conciliado":
+            continue
+        hist = str(
+            tx.get("hist")
+            or tx.get("dsHistorico")
+            or tx.get("nome")
+            or tx.get("memo")
+            or ""
+        ).upper()
+        if not any(k in hist for k in ("LIQUID", "COBRANCA", "BOLETO", "PAGTO TIT")):
+            continue
+        iid = str(tx.get("id") or tx.get("Financeiro_Caixas_Extratos_id") or "")
+        if not iid:
+            continue
+        try:
+            vr = abs(float(tx.get("vr") or tx.get("valor") or 0))
+        except (TypeError, ValueError):
+            vr = 0.0
+        liqs.append(f"{iid}({vr:.2f})")
+    if not liqs:
+        return ""
+    tit = f" título {id_titulo}" if id_titulo else ""
+    return (
+        f" Suspeita: CR{tit} preso em liquidação Conciliado "
+        f"{', '.join(liqs[:5])}. "
+        "Antes de Falta/ARIADNA: desconciliar com estornarTitulo=0; "
+        "ligar Pix/CR 1:1 no extrato certo; religar liquidação só PAGTO* "
+        "(nunca Pix/RECEBIMENTO DE CARTÃO no lote)."
+    )
+
+
 def _eh_pagto_mov(m: dict) -> bool:
-    """Ariadna 2026-10-27: liquidação = só recebimentos que INICIAM com PAGTO."""
+    """Liquidação = só hist que INICIA com PAGTO (nunca Pix/cartão/CR). 1.39.2."""
     return _hist_mov(m).upper().startswith("PAGTO")
 
 
 def _gravar_liquidacao(
     opener: Any, item: dict, ln: dict, *, id_caixa: str | int | None = None
 ) -> dict:
-    """Lote de boleto: extrato + movimentações PAGTO* do dia; POST conciliar."""
+    """Lote de boleto: extrato + SOMENTE movs PAGTO* (nunca Pix/cartão); POST conciliar."""
     cx = _caixa_str(id_caixa)
     data_ex = _data_linha(ln)
     valor = abs(float(ln.get("valor") or 0))
@@ -2129,7 +2179,7 @@ def _gravar_liquidacao(
         item["motivo"] = (
             (
                 f"Painel sem PAGTO de boleto (movs={len(movs)}, extrato={id_extrato}). "
-                "Ariadna: não force lote sem prefixo PAGTO."
+                "Ariadna: não force lote sem prefixo PAGTO; nunca Pix/cartão no lote."
             )
             if not is_saida
             else (
@@ -3118,12 +3168,19 @@ def _executar_gravar(
                         "Extrato pendente" in (item.get("motivo") or "")
                         or "Sem movimentação" in (item.get("motivo") or "")
                     ):
+                        hint = _suspeita_mov_presa_liquidacao(
+                            opener,
+                            id_caixa=cx,
+                            data_extrato=dia,
+                            id_titulo=str(tid),
+                        )
                         item["status"] = "ja_pago_painel"
                         item["gravou"] = False
                         item["id_titulo"] = tid
                         item["motivo"] = (
                             f"Pix {v:.2f}: título {tid} já pago no caixa {cx}; "
                             "movimento/extrato não aparece. Não liguei e não criei outro."
+                            + hint
                         )
                     executados.append(item)
                     continue
@@ -3150,12 +3207,20 @@ def _executar_gravar(
                     "Extrato pendente" in (item.get("motivo") or "")
                     or "Sem movimentação" in (item.get("motivo") or "")
                 ):
+                    tid_c = cand[0].get("id")
+                    hint = _suspeita_mov_presa_liquidacao(
+                        opener,
+                        id_caixa=cx,
+                        data_extrato=dia,
+                        id_titulo=str(tid_c) if tid_c is not None else None,
+                    )
                     item["status"] = "ja_pago_painel"
                     item["gravou"] = False
-                    item["id_titulo"] = cand[0].get("id")
+                    item["id_titulo"] = tid_c
                     item["motivo"] = (
-                        f"Pix {v:.2f}: título {cand[0].get('id')} já no painel; "
+                        f"Pix {v:.2f}: título {tid_c} já no painel; "
                         "sem movimento para ligar. Não criei outro."
+                        + hint
                     )
                 elif item.get("status") != "gravado":
                     item["status"] = item.get("status") or "erro"
@@ -3530,7 +3595,7 @@ def conciliar_dia_valenlub(
     cielo_csv_path: str | None = None,
     modo: str = "simular",
 ) -> ResultadoConciliacao:
-    """Concilia o caixa 4 do dia. Skill 1.39.1.
+    """Concilia o caixa 4 do dia. Skill 1.39.2.
 
     modo: "simular" (default) ou "executar".
     """
@@ -3839,7 +3904,7 @@ def _hermes_handler(args: dict, **kwargs) -> str:  # noqa: ARG001
 _HERMES_SCHEMA = {
     "name": "conciliar_dia_valenlub",
     "description": (
-        "Concilia o caixa 4 ValenLub no dia informado (skill 1.39.1). "
+        "Concilia o caixa 4 ValenLub no dia informado (skill 1.39.2). "
         "Lê OFX, GET Query contas-receber/contas-a-pagar, decide GRAVAR/ARIADNA, "
         "executa ou simula, gera PDF no visual aprovado."
     ),

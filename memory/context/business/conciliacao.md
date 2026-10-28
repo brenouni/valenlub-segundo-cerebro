@@ -27,7 +27,7 @@ Caixa 4 (a confirmar se ainda é). Cartão: Cielo (a confirmar se é só). Plani
 - Cruza: bateu / não bateu / falta arquivo.
 - Entrega rascunho curto para Ariadna: “estes N itens precisam dos seus olhos.”
 - Nunca entra no Bradesco. Nunca aperta 1111 / concluir. Nunca apaga. Nunca fala com cliente. Nunca inventa número.
-- Skill canônica: `skills/conciliacao-bancaria-valenlub/SKILL.md` versão 1.39.1. Ela vence este arquivo.
+- Skill canônica: `skills/conciliacao-bancaria-valenlub/SKILL.md` versão 1.39.2. Ela vence este arquivo.
 
 ## Fora desta frente
 Cobrança, Relator 08h, Tássia, as outras 7 empresas do grupo.
