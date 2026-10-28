@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
 description: "Conciliação do caixa 4. Anexo sem texto já é o pedido. Tela que fecha não é falta. Tente de novo."
-version: "1.39.2"
+version: "1.39.3"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -12,7 +12,7 @@ metadata:
 
 # Conciliação — ValenLub, caixa 4
 
-Fonte única. Versão 1.39.2. Você não decide. O script decide.
+Fonte única. Versão 1.39.3. Você não decide. O script decide.
 
 Não narrar passo. Não enviar mensagem de progresso. Não diga “Carrego”, “Vou achar”, “O GET veio”, “Rodo a decisão”.
 Só a mensagem final de fechamento (veredito + PDF). Zero narração de passagem.
@@ -31,9 +31,9 @@ Sem arquivo, pare. Responda sem ser marcado.
 2. Devolva só o campo `mensagem` + caminho do PDF. Zero narração. Zero UI.
 3. Não reimplemente GETs, cliques nem `decidir.py` na tela — a tool faz tudo.
 
-## Tool 1.39.2 (produção)
+## Tool 1.39.3 (produção)
 
-A tool `conciliar_dia_valenlub` (1.39.2) é a execução. Não reimplemente na UI o que a tool já faz.
+A tool `conciliar_dia_valenlub` (1.39.3) é a execução. Não reimplemente na UI o que a tool já faz.
 
 - GET paginado: (1) `dt_baixa` do dia; (2) suplementar `statusCobranca=Aberto,Pago` por vencimento (~45d) e cobrança (~7d). Merge por id. Cache em `cache/conciliacao/`.
 - Gate 0/1/N (aplicação 30060005, tarifa 30060001, resgate/rentabilidade 30060006): 0 cria, 1 só liga, ≥2 bloqueia. Mensagem lista **manter** (id mais antigo) e **estornar** (demais) na 1200/1100. Tool NÃO estorna no fluxo do dia (helpers de desconciliar/estornar/reabrir existem, mas exigem flag explícita).
@@ -183,10 +183,19 @@ Após `git pull` da skill/tool no VPS, **sempre** reiniciar o gateway — o Pyth
 
 ```bash
 systemctl --user restart hermes-gateway.service
-# prova: PID novo + versão em memória = disco (smoke 1.39.2)
+# prova: PID novo + versão em memória = disco (smoke 1.39.3)
 ```
 
 Falha clássica (28/10): disco em 1.39.1, gateway sem restart desde 24/10 → `receber_query` ~50 em vez de ~5040; 9 linhas «sem título».
+
+## PDF / cabeçalho = central live (1.39.3)
+
+O PDF **não pode mentir**. Cabeçalho Conciliado/Falta/Ajuste = GET `query_extrato_periodo` (central Omie), **não** a contagem da passagem.
+
+- Re-executar em dia já Conciliado: cartão/aplicação/pix/liquidação sem pendência → `ja_conciliado` (confirma status Conciliado na central). **Nunca** ARIADNA/`ja_existe_ligar` só porque `extrato_pendente` sumiu.
+- Seção «em falta» do PDF: só o que a central ainda tem Falta. Se Falta=0, lista vazia.
+- Relatório só-leitura (zero POST): `python3 tools/conciliar_dia_valenlub.py --relatorio-central --data YYYY-MM-DD --caixa 4 --pdf /caminho.pdf`
+(Aprendizado 28/10 — dia 19 já 27/0/0; re-executar gerou PDF 22/5 mentiroso.)
 
 ## Não fazer
 
@@ -197,5 +206,7 @@ Não invente baixa 1100 de Pix/DEP de cliente (só ARIADNA com id).
 Não invente baixa 1100 de cartão já pago no painel (só ligar 1:1).
 Não inclua Pix/CR/`RECEBIMENTO DE CARTÃO` no lote de liquidação (só `PAGTO*`).
 Não marque Falta/ARIADNA por «mov não aparece» sem checar se o CR está preso em liquidação Conciliado.
+Não marque Falta/ARIADNA/`ja_existe_ligar` em re-executar só porque extrato_pendente sumiu — confira Conciliado na central.
+Não imprima no PDF cabeçalho de passagem quando a central diz outra coisa (cabeçalho = live).
 Não entregue o dia com GRAVAR em aberto.
 Não faça `git pull` da tool sem reiniciar `hermes-gateway.service`.

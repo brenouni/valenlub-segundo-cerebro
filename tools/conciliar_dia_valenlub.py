@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conciliação do caixa 4 ValenLub — skill 1.39.2.
+"""Conciliação do caixa 4 ValenLub — skill 1.39.3.
 
 Função principal: conciliar_dia_valenlub(...)
 
@@ -871,7 +871,7 @@ def carregar_query(
     """GETs read-only. Retorna (receber, pagar, avisos).
 
     Exige QUERY_TENANT e (QUERY_TOKEN ou QUERY_USER+QUERY_PASS).
-    Skill 1.39.2: além da janela dt_baixa do dia, busca suplementar
+    Skill 1.39.3: além da janela dt_baixa do dia, busca suplementar
     statusCobranca=Aberto,Pago por vencimento (~45d) e cobrança (~7d)
     para achar CCR Pago com dtBaixa=null e Pix/DEP Abertos.
     """
@@ -1976,7 +1976,19 @@ def _ligar_titulo_na_linha(
         opener, id_caixa=cx, data_extrato=data_ex, valor=valor, prefer_hist=prefer_hist
     )
     if not tx:
-        # Sem pendência no valor = linha já ligada na passagem anterior.
+        # 1.39.3: confirma Conciliado na central (não assume só por ausência de pendente)
+        if _marcar_ja_conciliado_se_central(
+            opener,
+            item,
+            id_caixa=cx,
+            data_extrato=data_ex,
+            valor=valor,
+            prefer_hist=prefer_hist,
+            rotulo="Extrato",
+        ):
+            return item
+        # Sem linha no periodo tampouco — ainda trata como já conciliado
+        # (passagem anterior removeu da pendência; evita PDF mentiroso).
         item["status"] = "ja_conciliado"
         item["gravou"] = True
         item["motivo"] = (
@@ -2092,6 +2104,113 @@ def _suspeita_mov_presa_liquidacao(
     )
 
 
+
+def _contagem_central(
+    opener: Any,
+    *,
+    id_caixa: str | int | None,
+    data_extrato: str,
+) -> dict[str, int]:
+    """Contagem live da central (fonte da verdade do cabeçalho PDF/mensagem).
+
+    Skill 1.39.3: Conciliado/Falta/Ajuste vêm do GET periodo — não dos status
+    da passagem (que mentem em re-executar de dia já fechado).
+    """
+    out = {"Conciliado": 0, "Falta": 0, "Ajuste": 0}
+    cx = _caixa_str(id_caixa)
+    try:
+        txs = query_extrato_periodo(opener, id_caixa=cx, data_extrato=data_extrato)
+    except Exception:
+        return out
+    for tx in txs:
+        st = str(tx.get("status") or "").strip()
+        if st in out:
+            out[st] += 1
+        elif st:
+            # status inesperado — não inventa bucket
+            continue
+    return out
+
+
+def _linha_extrato_central(
+    opener: Any,
+    *,
+    id_caixa: str | int | None,
+    data_extrato: str,
+    valor: float,
+    prefer_hist: tuple[str, ...] = (),
+) -> dict | None:
+    """Acha linha do extrato no periodo (qualquer status) por valor ±0,02."""
+    cx = _caixa_str(id_caixa)
+    try:
+        txs = query_extrato_periodo(opener, id_caixa=cx, data_extrato=data_extrato)
+    except Exception:
+        return None
+    cand: list[dict] = []
+    alvo = abs(float(valor))
+    for t in txs:
+        try:
+            vr = abs(float(t.get("vr") or t.get("valor") or 0))
+        except (TypeError, ValueError):
+            continue
+        if abs(vr - alvo) > 0.02:
+            continue
+        cand.append(t)
+    if not cand:
+        return None
+    if prefer_hist:
+        pref = [
+            t
+            for t in cand
+            if any(
+                k in str(t.get("hist") or t.get("dsHistorico") or t.get("nome") or "").upper()
+                for k in prefer_hist
+            )
+        ]
+        if pref:
+            # prefer Conciliado if several
+            conc = [t for t in pref if str(t.get("status") or "") == "Conciliado"]
+            return (conc or pref)[0]
+    conc = [t for t in cand if str(t.get("status") or "") == "Conciliado"]
+    return (conc or cand)[0]
+
+
+def _marcar_ja_conciliado_se_central(
+    opener: Any,
+    item: dict,
+    *,
+    id_caixa: str | int | None,
+    data_extrato: str,
+    valor: float,
+    prefer_hist: tuple[str, ...] = (),
+    rotulo: str = "Linha",
+) -> bool:
+    """Se a linha do extrato já está Conciliado na central → ja_conciliado.
+
+    Retorna True se marcou. Skill 1.39.3 — evita PDF mentiroso em re-executar.
+    """
+    tx = _linha_extrato_central(
+        opener,
+        id_caixa=id_caixa,
+        data_extrato=data_extrato,
+        valor=valor,
+        prefer_hist=prefer_hist,
+    )
+    if not tx:
+        return False
+    if str(tx.get("status") or "") != "Conciliado":
+        return False
+    iid = str(tx.get("id") or tx.get("Financeiro_Caixas_Extratos_id") or "")
+    item["status"] = "ja_conciliado"
+    item["gravou"] = True
+    item["id_extrato"] = iid
+    item["motivo"] = (
+        f"{rotulo} {abs(float(valor)):.2f} já Conciliado na central "
+        f"(extrato {iid or '—'}, {_caixa_str(id_caixa)}, {data_extrato})."
+    )
+    return True
+
+
 def _eh_pagto_mov(m: dict) -> bool:
     """Liquidação = só hist que INICIA com PAGTO (nunca Pix/cartão/CR). 1.39.2."""
     return _hist_mov(m).upper().startswith("PAGTO")
@@ -2130,6 +2249,16 @@ def _gravar_liquidacao(
     liq = [t for t in cand if "LIQUID" in str(t.get("hist") or "").upper()]
     tx = (liq or cand or [None])[0]
     if not tx:
+        if _marcar_ja_conciliado_se_central(
+            opener,
+            item,
+            id_caixa=cx,
+            data_extrato=data_ex,
+            valor=valor,
+            prefer_hist=("LIQUID", "BOLETO", "PAGTO"),
+            rotulo="Liquidação",
+        ):
+            return item
         item["status"] = "ja_conciliado"
         item["gravou"] = True
         item["motivo"] = (
@@ -2454,6 +2583,19 @@ def _ligar_aplicacao(
     ]
     tx = (aplic or cand or [None])[0]
     if not tx:
+        # 1.39.3: pendente sumiu porque já Conciliado — não mente "ligar"
+        if _marcar_ja_conciliado_se_central(
+            opener,
+            item,
+            id_caixa=cx,
+            data_extrato=data_ex,
+            valor=valor,
+            prefer_hist=("APLIC",),
+            rotulo="Aplicação",
+        ):
+            item["id_titulo"] = titulo.get("id")
+            item["tipo"] = "aplicacao_ja_conciliada"
+            return item
         item["status"] = "ja_existe_ligar"
         item["gravou"] = False
         item["id_titulo"] = titulo.get("id")
@@ -3038,6 +3180,22 @@ def _executar_gravar(
                         prefer_hist=("CIELO", "CARTAO", "CARTÃO", "VISA", "MASTER", "ELO", "AMEX", "REDE"),
                     )
                     if not tx:
+                        # 1.39.3: dia já fechado — pendente some; central Conciliado ≠ falta
+                        if _marcar_ja_conciliado_se_central(
+                            opener,
+                            item,
+                            id_caixa=cx,
+                            data_extrato=dia,
+                            valor=v,
+                            prefer_hist=(
+                                "CIELO", "CARTAO", "CARTÃO", "VISA", "MASTER",
+                                "ELO", "AMEX", "REDE", "RECEBIMENTO",
+                            ),
+                            rotulo="Cartão",
+                        ):
+                            item["tipo"] = "cartao_ja_conciliado"
+                            executados.append(item)
+                            continue
                         item["status"] = "ariadna"
                         item["gravou"] = False
                         item["tipo"] = "cartao_painel"
@@ -3318,6 +3476,7 @@ def _mensagem_fechamento(
     executados: list[dict],
     ariadna: list[dict],
     pdf_path: str | None,
+    central: dict[str, int] | None = None,
 ) -> str:
     """Único texto a enviar ao usuário — veredito final, sem narração."""
     try:
@@ -3325,7 +3484,17 @@ def _mensagem_fechamento(
         dia_br = dt.strftime("%d/%m")
     except ValueError:
         dia_br = data
-    conciliado, falta, fechado, planejado = _contagens_honestas(executados, ariadna)
+    conciliado_pass, falta_pass, fechado_pass, planejado = _contagens_honestas(
+        executados, ariadna
+    )
+    # 1.39.3: cabeçalho = central live; passagem só detalha o que ainda falta de verdade
+    if central is not None:
+        conciliado = int(central.get("Conciliado") or 0)
+        falta = int(central.get("Falta") or 0)
+        ajuste = int(central.get("Ajuste") or 0)
+        fechado = falta == 0 and conciliado >= 1
+    else:
+        conciliado, falta, fechado, ajuste = conciliado_pass, falta_pass, fechado_pass, 0
     ent, sai = _totais_entrada_saida(decisoes)
 
     def _br(n: float) -> str:
@@ -3341,7 +3510,8 @@ def _mensagem_fechamento(
     estado = "fechado" if fechado else "aberto"
     head = (
         f"Dia {dia_br}, caixa {caixa}.{fecha_txt} "
-        f"Na central: {conciliado} ligadas, {falta} em falta, ajuste 0 ({estado})."
+        f"Na central: {conciliado} ligadas, {falta} em falta, "
+        f"ajuste {ajuste} ({estado})."
     )
     if modo == "executar" and executados:
         head += f" Executar: {conciliado}/{len(executados)} gravado."
@@ -3371,7 +3541,7 @@ def _mensagem_fechamento(
         partes = []
         for e in itens:
             st = e.get("status")
-            if st == "gravado":
+            if st in ("gravado", "ja_conciliado"):
                 partes.append(f"{_vf(e.get('valor'))} ligado")
             elif st == "ariadna":
                 partes.append(f"{_vf(e.get('valor'))} em falta")
@@ -3476,6 +3646,7 @@ def _montar_json_pdf(
     executados: list[dict],
     ariadna: list[dict],
     modo: str,
+    central: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     by_classe: dict[str, list[dict]] = {}
     for e in executados:
@@ -3515,27 +3686,64 @@ def _montar_json_pdf(
                     "acao": e.get("motivo") or st,
                 }
             )
-    conciliado, falta, fechado, planejado = _contagens_honestas(executados, ariadna)
+    conciliado_pass, falta_pass, fechado_pass, planejado = _contagens_honestas(
+        executados, ariadna
+    )
+    # 1.39.3: cabeçalho = central live (nunca mente em re-executar)
+    if central is not None:
+        conciliado = int(central.get("Conciliado") or 0)
+        falta = int(central.get("Falta") or 0)
+        ajuste = int(central.get("Ajuste") or 0)
+        fechado = falta == 0 and conciliado >= 1
+        # Só imprime "em falta" o que a central ainda tem Falta>0
+        if falta == 0:
+            falta_linhas = []
+    else:
+        conciliado, falta, fechado, ajuste = (
+            conciliado_pass, falta_pass, fechado_pass, 0
+        )
+    # data BR no PDF
+    try:
+        dt = datetime.strptime(data[:10], "%Y-%m-%d")
+        data_br = dt.strftime("%d/%m/%Y")
+        fecha_br = data_br
+    except ValueError:
+        data_br = data
+        fecha_br = data
+    src = "central Omie (live)" if central is not None else f"passagem {modo}"
     return {
-        "data": data,
-        "linhas": len(linhas),
-        "fecha": data,
+        "data": data_br,
+        "linhas": len(linhas) if linhas else conciliado + falta + ajuste,
+        "fecha": fecha_br,
         "fechado": fechado,
         "conciliado": conciliado,
         "planejado": planejado,
         "falta": falta,
-        "ajuste": 0,
+        "ajuste": ajuste,
         "fechou": fechou
-        or ([{"classe": "—", "qtd": 0, "feito": "Nada gravado nesta passagem."}] if not falta_linhas else []),
+        or (
+            [{"classe": "central", "qtd": conciliado, "feito": "Já Conciliado na central."}]
+            if fechado and conciliado
+            else (
+                [{"classe": "—", "qtd": 0, "feito": "Nada gravado nesta passagem."}]
+                if not falta_linhas
+                else []
+            )
+        ),
         "falta_linhas": falta_linhas,
         "gravado": (
-            f"Modo {modo}. Conciliado {conciliado}. Planejado {planejado}. Falta {falta}."
+            f"Fonte: {src}. Conciliado {conciliado}. Falta {falta}. Ajuste {ajuste}."
             + (
-                " Escrita: aplicacao/tarifa (gate 0/1/N + criar.consumo.snf + conciliar), "
-                "resgate/rentabilidade (gate + criar.novo+baixa + conciliar), "
-                "liquidacao/boleto/cartao/pix (conciliar); desdobro → bloqueio_desdobro."
-                if modo == "executar"
-                else " Simulado não fecha o dia."
+                f" Passagem: gravado/ja_conciliado={conciliado_pass}, "
+                f"planejado={planejado}, falta_passagem={falta_pass}."
+                if central is not None
+                else ""
+            )
+            + (
+                " Escrita: aplicacao/tarifa/resgate/rentabilidade/liquidacao/"
+                "boleto/cartao/pix (conciliar); desdobro → bloqueio_desdobro."
+                if modo == "executar" and central is None
+                else (" Simulado não fecha o dia." if modo == "simular" and central is None else "")
             )
         ),
     }
@@ -3595,7 +3803,7 @@ def conciliar_dia_valenlub(
     cielo_csv_path: str | None = None,
     modo: str = "simular",
 ) -> ResultadoConciliacao:
-    """Concilia o caixa 4 do dia. Skill 1.39.2.
+    """Concilia o caixa 4 do dia. Skill 1.39.3.
 
     modo: "simular" (default) ou "executar".
     """
@@ -3704,18 +3912,41 @@ def conciliar_dia_valenlub(
         gravar, modo, pagar=pagar, receber=receber, id_caixa=caixa
     )
 
+    # 1.39.3: contagem live da central = fonte da verdade do cabeçalho
+    central: dict[str, int] | None = None
+    try:
+        opener_c = mgerencia_session()
+        central = _contagem_central(
+            opener_c, id_caixa=caixa, data_extrato=data
+        )
+    except Exception as exc:  # noqa: BLE001
+        erros.append(f"central: {exc}")
+
     if pdf_path is None:
         out_dir = _cache_dir()
         pdf_path = str(out_dir / f"conciliacao-{data}-caixa{caixa}.pdf")
 
     pdf_ok: str | None = None
     try:
-        dados_pdf = _montar_json_pdf(data, decisoes, executados, ariadna, modo)
+        dados_pdf = _montar_json_pdf(
+            data, decisoes, executados, ariadna, modo, central=central
+        )
         pdf_ok = gerar_pdf(dados_pdf, pdf_path)
     except Exception as exc:  # noqa: BLE001
         erros.append(f"PDF: {exc}")
 
-    conciliado, falta, fechado, planejado = _contagens_honestas(executados, ariadna)
+    conciliado_pass, falta_pass, fechado_pass, planejado = _contagens_honestas(
+        executados, ariadna
+    )
+    if central is not None:
+        conciliado = int(central.get("Conciliado") or 0)
+        falta = int(central.get("Falta") or 0)
+        ajuste = int(central.get("Ajuste") or 0)
+        fechado = falta == 0 and conciliado >= 1
+    else:
+        conciliado, falta, fechado, ajuste = (
+            conciliado_pass, falta_pass, fechado_pass, 0
+        )
     status = "fechado" if fechado else ("aberto" if (falta or ariadna or planejado) else "ok")
     if erros and not receber and not pagar:
         status = "parcial"
@@ -3732,6 +3963,10 @@ def conciliar_dia_valenlub(
             "conciliado": conciliado,
             "planejado": planejado,
             "falta": falta,
+            "ajuste": ajuste,
+            "central_conciliado": (central or {}).get("Conciliado"),
+            "central_falta": (central or {}).get("Falta"),
+            "central_ajuste": (central or {}).get("Ajuste"),
             "receber_query": len(receber),
             "pagar_query": len(pagar),
         },
@@ -3752,10 +3987,106 @@ def conciliar_dia_valenlub(
         erros=erros,
         executados=executados,
         mensagem=_mensagem_fechamento(
-            data, caixa, modo, decisoes, executados, ariadna, pdf_ok
+            data, caixa, modo, decisoes, executados, ariadna, pdf_ok, central=central
         ),
     )
 
+
+
+# ---------------------------------------------------------------------------
+# Relatório só-leitura (central live) — NÃO muta
+# ---------------------------------------------------------------------------
+
+def relatorio_central_dia(
+    data: str,
+    caixa: int = 4,
+    pdf_path: str | None = None,
+) -> dict[str, Any]:
+    """Gera PDF/resumo a partir do GET periodo — zero POST.
+
+    Skill 1.39.3: cabeçalho = Conciliado/Falta/Ajuste da central.
+    """
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", data or ""):
+        return {"ok": False, "erro": "data deve ser YYYY-MM-DD"}
+    opener = mgerencia_session()
+    central = _contagem_central(opener, id_caixa=caixa, data_extrato=data)
+    txs = query_extrato_periodo(opener, id_caixa=_caixa_str(caixa), data_extrato=data)
+    falta_linhas = []
+    for tx in txs:
+        st = str(tx.get("status") or "")
+        hist = str(
+            tx.get("hist")
+            or tx.get("dsHistorico")
+            or tx.get("nome")
+            or tx.get("memo")
+            or ""
+        )
+        try:
+            vr = abs(float(tx.get("vr") or tx.get("valor") or 0))
+        except (TypeError, ValueError):
+            vr = 0.0
+        if st == "Falta":
+            falta_linhas.append(
+                {
+                    "valor": f"{vr:.2f}".replace(".", ","),
+                    "classe": "extrato",
+                    "acao": hist or f"Extrato {tx.get('id')}",
+                }
+            )
+    conciliado = int(central.get("Conciliado") or 0)
+    falta = int(central.get("Falta") or 0)
+    ajuste = int(central.get("Ajuste") or 0)
+    fechado = falta == 0 and conciliado >= 1
+    try:
+        dt = datetime.strptime(data[:10], "%Y-%m-%d")
+        data_br = dt.strftime("%d/%m/%Y")
+        dia_br = dt.strftime("%d/%m")
+    except ValueError:
+        data_br = data
+        dia_br = data
+    dados = {
+        "data": data_br,
+        "linhas": len(txs),
+        "fecha": data_br,
+        "fechado": fechado,
+        "conciliado": conciliado,
+        "planejado": 0,
+        "falta": falta,
+        "ajuste": ajuste,
+        "fechou": (
+            [
+                {
+                    "classe": "central",
+                    "qtd": conciliado,
+                    "feito": "Conciliado na central Omie.",
+                }
+            ]
+            if conciliado
+            else []
+        ),
+        "falta_linhas": falta_linhas,
+        "gravado": (
+            f"Fonte: central Omie (live). Conciliado {conciliado}. "
+            f"Falta {falta}. Ajuste {ajuste}. Sem POST."
+        ),
+    }
+    if pdf_path is None:
+        pdf_path = str(_cache_dir() / f"conciliacao-{data}-caixa{caixa}-central.pdf")
+    pdf_ok = gerar_pdf(dados, pdf_path)
+    estado = "fechado" if fechado else "aberto"
+    mensagem = (
+        f"Dia {dia_br}, caixa {caixa}. "
+        f"Na central: {conciliado} ligadas, {falta} em falta, "
+        f"ajuste {ajuste} ({estado}).\nPDF: {pdf_ok}"
+    )
+    return {
+        "ok": True,
+        "central": central,
+        "pdf_path": pdf_ok,
+        "mensagem": mensagem,
+        "fechado": fechado,
+        "n_linhas": len(txs),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -3904,7 +4235,7 @@ def _hermes_handler(args: dict, **kwargs) -> str:  # noqa: ARG001
 _HERMES_SCHEMA = {
     "name": "conciliar_dia_valenlub",
     "description": (
-        "Concilia o caixa 4 ValenLub no dia informado (skill 1.39.2). "
+        "Concilia o caixa 4 ValenLub no dia informado (skill 1.39.3). "
         "Lê OFX, GET Query contas-receber/contas-a-pagar, decide GRAVAR/ARIADNA, "
         "executa ou simula, gera PDF no visual aprovado."
     ),
@@ -3956,6 +4287,11 @@ def _cli() -> int:
     p.add_argument("--modo", choices=("simular", "executar"), default="simular")
     p.add_argument("--json-out", dest="json_out", default=None)
     p.add_argument(
+        "--relatorio-central",
+        action="store_true",
+        help="Só-leitura: PDF/resumo a partir do GET periodo (zero POST). Skill 1.39.3.",
+    )
+    p.add_argument(
         "--reabrir-dia",
         action="store_true",
         help="Modo explícito: listar/desligar Conciliado (não usa OFX). Default dry-run.",
@@ -3972,6 +4308,16 @@ def _cli() -> int:
         help="Com --reabrir-dia --executar-reabrir: ids AP órfãos p/ estornar (csv).",
     )
     args = p.parse_args()
+
+    if getattr(args, "relatorio_central", False):
+        payload = relatorio_central_dia(
+            data=args.data, caixa=args.caixa, pdf_path=args.pdf_path
+        )
+        text_out = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+        if args.json_out:
+            Path(args.json_out).write_text(text_out, encoding="utf-8")
+        print(text_out)
+        raise SystemExit(0 if payload.get("ok") else 2)
 
     if args.reabrir_dia:
         ids = None
