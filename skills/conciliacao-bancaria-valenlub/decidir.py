@@ -451,17 +451,8 @@ def decidir(ext, rec, pag):
                         )
                     continue
                 if len(use) > 1:
-                    out.append(
-                        {
-                            **linha,
-                            "veredito": "ARIADNA",
-                            "acao": (
-                                f"Cielo bruto {alvo:.2f}: vários títulos. Ids: "
-                                + ", ".join(str(t.get("id")) for t in use[:6])
-                            ),
-                        }
-                    )
-                    continue
+                    # Vários no bruto: não ARIADNA ainda — tenta agregação / painel 1:1
+                    pass
             # 3) agregação: N títulos (ex. 3 DEB) somam 1 OFX
             combo = _agregar_titulos(rec, v, max_n=5)
             # se veio cielo_agregados, prioriza esses líquidos
@@ -519,17 +510,20 @@ def decidir(ext, rec, pag):
                     }
                 )
                 continue
+            # Sem título líquido/bruto/agregação: cartão já baixado no painel → só ligar
             hint = ""
             if cielo_bruto is not None:
-                hint = (
-                    f" Cielo bruto {float(cielo_bruto):.2f} sem título no centavo — "
-                    "se for parcela de venda maior, desdobrar na tela (não usar ≈5%)."
-                )
+                hint = f" Cielo bruto {float(cielo_bruto):.2f}."
             out.append(
                 {
                     **linha,
-                    "veredito": "ARIADNA",
-                    "acao": f"Extrato: {nome}. Sem título no valor (nem Cielo bruto).{hint}",
+                    "veredito": "GRAVAR",
+                    "acao": (
+                        "Cartão já pago no painel — ligar no líquido. "
+                        "Sem título único no Query; use movimentação "
+                        "RECEBIMENTO/CARTÃO/CIELO 1:1."
+                        + hint
+                    ),
                 }
             )
             continue

@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
 description: "Conciliação do caixa 4. Anexo sem texto já é o pedido. Tela que fecha não é falta. Tente de novo."
-version: "1.39.0"
+version: "1.39.1"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -12,7 +12,7 @@ metadata:
 
 # Conciliação — ValenLub, caixa 4
 
-Fonte única. Versão 1.39.0. Você não decide. O script decide.
+Fonte única. Versão 1.39.1. Você não decide. O script decide.
 
 Não narrar passo. Não enviar mensagem de progresso. Não diga “Carrego”, “Vou achar”, “O GET veio”, “Rodo a decisão”.
 Só a mensagem final de fechamento (veredito + PDF). Zero narração de passagem.
@@ -31,14 +31,14 @@ Sem arquivo, pare. Responda sem ser marcado.
 2. Devolva só o campo `mensagem` + caminho do PDF. Zero narração. Zero UI.
 3. Não reimplemente GETs, cliques nem `decidir.py` na tela — a tool faz tudo.
 
-## Tool 1.39.0 (produção)
+## Tool 1.39.1 (produção)
 
-A tool `conciliar_dia_valenlub` (1.39.0) é a execução. Não reimplemente na UI o que a tool já faz.
+A tool `conciliar_dia_valenlub` (1.39.1) é a execução. Não reimplemente na UI o que a tool já faz.
 
 - GET paginado: (1) `dt_baixa` do dia; (2) suplementar `statusCobranca=Aberto,Pago` por vencimento (~45d) e cobrança (~7d). Merge por id. Cache em `cache/conciliacao/`.
 - Gate 0/1/N (aplicação 30060005, tarifa 30060001, resgate/rentabilidade 30060006): 0 cria, 1 só liga, ≥2 bloqueia. Mensagem lista **manter** (id mais antigo) e **estornar** (demais) na 1200/1100. Tool NÃO estorna no fluxo do dia (helpers de desconciliar/estornar/reabrir existem, mas exigem flag explícita).
 - Depois de criar, parse do id + `conciliar` com `prefer_hist` (APLIC/TARIFA/RESGATE).
-- Cartão: casa líquido ±0,02 ou bruto Cielo (CSV). **Sem fallback 5%**. Desdobro só com evidência Cielo/parcela ou acao Desdobre. N títulos → 1 OFX (±0,02) = agregação (multi-id).
+- Cartão: casa líquido ±0,02 ou bruto Cielo (CSV). **Sem fallback 5%**. Desdobro só com evidência Cielo/parcela ou acao Desdobre. N títulos → 1 OFX (±0,02) = agregação (multi-id). Sem título único no Query: se já baixado no painel → **só ligar** (mov 1:1 RECEBIMENTO/CARTÃO/CIELO); 0 ou 2+ movs → ARIADNA. Não baixar de novo.
 - Pix / DEPOSIT TED: título Pago → liga; título **Aberto** → ARIADNA com id (baixar 1100 na tela; tool não inventa baixa de cliente). Sem título → tenta ligar pelo valor; senão ARIADNA.
 - Débito `PAGTO ELETRON` / cobrança saída → classe `pagar` (AP por valor); não lote PAGTO crédito.
 - PDF/mensagem: `conciliado` = só `gravado`; `planejado` = `simulado`; `falta` inclui stub/bloqueio/desdobro/erro/ja_*; fechado só se falta=0, planejado=0 e conciliado≥1.
@@ -80,6 +80,15 @@ Parcela Elo/bandeira cujo título é a venda inteira (ex. 3239 vs líquido 776,4
 ## Agregação cartão (N→1)
 
 Três (ou N) DEB/CCR Cielo somam um crédito OFX: a tool tenta multi-id. Se títulos Abertos, baixe antes (1100/tela) e rode de novo.
+
+
+## Cartão já pago no painel (só ligar)
+
+Igual liquidação `PAGTO*`: se o recebimento **já está baixado** no painel (movimentação `RECEBIMENTO DE CARTÃO…` / Cielo / Master / Amex), a tool **não baixa de novo**.
+Sem título líquido/bruto/agregação no Query ≠ “sem título” se existir **movimentação 1:1** no valor do OFX.
+- 1 mov no líquido → `conciliar` (ligar extrato↔mov).
+- 0 ou 2+ movs → ARIADNA (não chute).
+Não inventar título 1100 de cartão.
 
 ## Lote de boleto (crédito)
 
@@ -156,4 +165,5 @@ Não estorna no fluxo do dia (só com --reabrir-dia --executar-reabrir). Não gr
 Não procure um título no valor do lote de boleto crédito.
 Não use fallback “≈5%” em cartão.
 Não invente baixa 1100 de Pix/DEP de cliente (só ARIADNA com id).
+Não invente baixa 1100 de cartão já pago no painel (só ligar 1:1).
 Não entregue o dia com GRAVAR em aberto.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conciliação do caixa 4 ValenLub — skill 1.39.0.
+"""Conciliação do caixa 4 ValenLub — skill 1.39.1.
 
 Função principal: conciliar_dia_valenlub(...)
 
@@ -871,7 +871,7 @@ def carregar_query(
     """GETs read-only. Retorna (receber, pagar, avisos).
 
     Exige QUERY_TENANT e (QUERY_TOKEN ou QUERY_USER+QUERY_PASS).
-    Skill 1.39.0: além da janela dt_baixa do dia, busca suplementar
+    Skill 1.39.1: além da janela dt_baixa do dia, busca suplementar
     statusCobranca=Aberto,Pago por vencimento (~45d) e cobrança (~7d)
     para achar CCR Pago com dtBaixa=null e Pix/DEP Abertos.
     """
@@ -1727,6 +1727,58 @@ def _eh_cartao_mov(m: dict) -> bool:
     )
     return bool(_CARTAO_RE.search(blob))
 
+
+
+
+def _achar_movs_exatos_cartao(
+    opener: Any,
+    *,
+    id_caixa: str,
+    data_extrato: str,
+    valor: float,
+    tp: str = "Credito",
+    prefer_hist: tuple[str, ...] = (
+        "RECEBIMENTO",
+        "CARTAO",
+        "CARTÃO",
+        "CIELO",
+        "MASTER",
+        "AMEX",
+        "VISA",
+        "ELO",
+        "REDE",
+    ),
+) -> list[str]:
+    """Ids de movimentação com valor exato (±0,02) e hist de cartão/recebimento.
+
+    Não faz subset-sum: devolve todos os matches 1:1 no valor (filtrados).
+    Usado quando cartão já está pago no painel e não há id de título no Query.
+    """
+    movs = query_movimentacoes_para_alvo(
+        opener, id_caixa=id_caixa, data_extrato=data_extrato, valor=valor, tp=tp
+    )
+    alvo = abs(float(valor))
+    prefs = tuple(k.upper() for k in prefer_hist)
+    out: list[str] = []
+    for m in movs:
+        mid = m.get("idMovimentacao") or m.get("id")
+        if mid is None:
+            continue
+        try:
+            vr = abs(float(m.get("vr") or m.get("valor") or 0))
+        except (TypeError, ValueError):
+            continue
+        if abs(vr - alvo) > 0.02:
+            continue
+        blob = (
+            _hist_mov(m)
+            + " "
+            + " ".join(str(m.get(k) or "") for k in ("hist", "dsHistorico", "pessoa", "nmPessoa", "origem"))
+        ).upper()
+        if prefs and not any(k in blob for k in prefs) and not _eh_cartao_mov(m):
+            continue
+        out.append(str(mid))
+    return list(dict.fromkeys(out))
 
 
 def _caixa_str(id_caixa: str | int | None = None) -> str:
@@ -2691,6 +2743,12 @@ def _executar_gravar(
                 elif ln.get("id"):
                     item["tipo"] = f"{classe}_seria_ligado"
                     item["id_titulo"] = ln.get("id")
+                elif classe == "cartao":
+                    item["tipo"] = "cartao_seria_ligado_painel"
+                    item["motivo"] = (
+                        ln.get("acao")
+                        or "Cartão já pago no painel — ligar no líquido."
+                    )
                 else:
                     item["tipo"] = f"{classe}_sem_titulo"
             executados.append(item)
@@ -2909,9 +2967,84 @@ def _executar_gravar(
                 v = abs(float(ln.get("valor") or 0))
                 acao = str(ln.get("acao") or "")
                 if not tid:
-                    item["status"] = "stub_noop"
-                    item["gravou"] = False
-                    item["motivo"] = "Cartão GRAVAR sem id de título — use a tela."
+                    # Cartão já pago no painel: ligar extrato ↔ mov 1:1 (não criar/baixar)
+                    dia = _data_linha(ln)
+                    prefer = (
+                        "RECEBIMENTO",
+                        "CARTAO",
+                        "CARTÃO",
+                        "CIELO",
+                        "MASTER",
+                        "AMEX",
+                        "VISA",
+                        "ELO",
+                        "REDE",
+                    )
+                    tx = _achar_extrato_por_valor(
+                        opener,
+                        id_caixa=cx,
+                        data_extrato=dia,
+                        valor=v,
+                        prefer_hist=("CIELO", "CARTAO", "CARTÃO", "VISA", "MASTER", "ELO", "AMEX", "REDE"),
+                    )
+                    if not tx:
+                        item["status"] = "ariadna"
+                        item["gravou"] = False
+                        item["tipo"] = "cartao_painel"
+                        item["motivo"] = (
+                            f"Cartão {v:.2f}: extrato pendente não achado para ligar "
+                            "(já pago no painel)."
+                        )
+                        executados.append(item)
+                        continue
+                    id_extrato = str(
+                        tx.get("id") or tx.get("Financeiro_Caixas_Extratos_id") or ""
+                    )
+                    if not id_extrato:
+                        item["status"] = "ariadna"
+                        item["gravou"] = False
+                        item["tipo"] = "cartao_painel"
+                        item["motivo"] = f"Cartão {v:.2f}: linha de extrato sem id."
+                        executados.append(item)
+                        continue
+                    mov_ids = _achar_movs_exatos_cartao(
+                        opener,
+                        id_caixa=cx,
+                        data_extrato=dia,
+                        valor=v,
+                        tp="Credito",
+                        prefer_hist=prefer,
+                    )
+                    if len(mov_ids) != 1:
+                        item["status"] = "ariadna"
+                        item["gravou"] = False
+                        item["tipo"] = "cartao_painel"
+                        item["id_extrato"] = id_extrato
+                        item["ids_movimentacao"] = mov_ids
+                        item["motivo"] = (
+                            f"Cartão {v:.2f} já pago no painel: "
+                            f"{len(mov_ids)} mov(s) no líquido "
+                            f"(precisa exatamente 1). Ids: {', '.join(mov_ids[:6]) or '—'}."
+                        )
+                        executados.append(item)
+                        continue
+                    resp = query_conciliar_lote(
+                        opener, id_extrato=id_extrato, ids_movimentacao=mov_ids
+                    )
+                    ok = _parse_conciliar_ok(resp, item)
+                    item["status"] = "gravado" if ok else "erro"
+                    item["gravou"] = ok
+                    item["tipo"] = "cartao_ligado_painel"
+                    item["id_extrato"] = id_extrato
+                    item["ids_movimentacao"] = mov_ids
+                    item["endpoint"] = (
+                        "/mgerencia/scripts/financeiro/conciliacao/actions&id=conciliar"
+                    )
+                    if not ok:
+                        item["motivo"] = (
+                            f"Cartão {v:.2f}: conciliar painel sem isOk "
+                            f"(extrato {id_extrato}, mov {mov_ids[0]})."
+                        )
                     executados.append(item)
                     continue
                 # Desdobro: não ligar pedaço no título inteiro
@@ -3397,7 +3530,7 @@ def conciliar_dia_valenlub(
     cielo_csv_path: str | None = None,
     modo: str = "simular",
 ) -> ResultadoConciliacao:
-    """Concilia o caixa 4 do dia. Skill 1.39.0.
+    """Concilia o caixa 4 do dia. Skill 1.39.1.
 
     modo: "simular" (default) ou "executar".
     """
@@ -3706,7 +3839,7 @@ def _hermes_handler(args: dict, **kwargs) -> str:  # noqa: ARG001
 _HERMES_SCHEMA = {
     "name": "conciliar_dia_valenlub",
     "description": (
-        "Concilia o caixa 4 ValenLub no dia informado (skill 1.39.0). "
+        "Concilia o caixa 4 ValenLub no dia informado (skill 1.39.1). "
         "Lê OFX, GET Query contas-receber/contas-a-pagar, decide GRAVAR/ARIADNA, "
         "executa ou simula, gera PDF no visual aprovado."
     ),
