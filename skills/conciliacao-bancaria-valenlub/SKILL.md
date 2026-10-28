@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
 description: "Conciliação do caixa 4. Anexo sem texto já é o pedido. Tela que fecha não é falta. Tente de novo."
-version: "1.38.4"
+version: "1.39.0"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -12,7 +12,7 @@ metadata:
 
 # Conciliação — ValenLub, caixa 4
 
-Fonte única. Versão 1.38.4. Você não decide. O script decide.
+Fonte única. Versão 1.39.0. Você não decide. O script decide.
 
 Não narrar passo. Não enviar mensagem de progresso. Não diga “Carrego”, “Vou achar”, “O GET veio”, “Rodo a decisão”.
 Só a mensagem final de fechamento (veredito + PDF). Zero narração de passagem.
@@ -31,12 +31,12 @@ Sem arquivo, pare. Responda sem ser marcado.
 2. Devolva só o campo `mensagem` + caminho do PDF. Zero narração. Zero UI.
 3. Não reimplemente GETs, cliques nem `decidir.py` na tela — a tool faz tudo.
 
-## Tool 1.38.4 (produção)
+## Tool 1.39.0 (produção)
 
-A tool `conciliar_dia_valenlub` (1.38.4) é a execução. Não reimplemente na UI o que a tool já faz.
+A tool `conciliar_dia_valenlub` (1.39.0) é a execução. Não reimplemente na UI o que a tool já faz.
 
 - GET paginado: (1) `dt_baixa` do dia; (2) suplementar `statusCobranca=Aberto,Pago` por vencimento (~45d) e cobrança (~7d). Merge por id. Cache em `cache/conciliacao/`.
-- Gate 0/1/N (aplicação 30060005, tarifa 30060001, resgate/rentabilidade 30060006): 0 cria, 1 só liga, ≥2 bloqueia. Mensagem lista **manter** (id mais antigo) e **estornar** (demais) na 1200/1100. Tool NÃO estorna.
+- Gate 0/1/N (aplicação 30060005, tarifa 30060001, resgate/rentabilidade 30060006): 0 cria, 1 só liga, ≥2 bloqueia. Mensagem lista **manter** (id mais antigo) e **estornar** (demais) na 1200/1100. Tool NÃO estorna no fluxo do dia (helpers de desconciliar/estornar/reabrir existem, mas exigem flag explícita).
 - Depois de criar, parse do id + `conciliar` com `prefer_hist` (APLIC/TARIFA/RESGATE).
 - Cartão: casa líquido ±0,02 ou bruto Cielo (CSV). **Sem fallback 5%**. Desdobro só com evidência Cielo/parcela ou acao Desdobre. N títulos → 1 OFX (±0,02) = agregação (multi-id).
 - Pix / DEPOSIT TED: título Pago → liga; título **Aberto** → ARIADNA com id (baixar 1100 na tela; tool não inventa baixa de cliente). Sem título → tenta ligar pelo valor; senão ARIADNA.
@@ -44,7 +44,27 @@ A tool `conciliar_dia_valenlub` (1.38.4) é a execução. Não reimplemente na U
 - PDF/mensagem: `conciliado` = só `gravado`; `planejado` = `simulado`; `falta` inclui stub/bloqueio/desdobro/erro/ja_*; fechado só se falta=0, planejado=0 e conciliado≥1.
 - Só a mensagem final + PDF. Zero narração de passagem.
 
+## Reabrir dia (explícito — NÃO no fluxo diário)
+
+A tool agora sabe:
+- `query_desconciliar(opener, id_extrato, estornar_titulo=0)` → POST `/scripts/financeiro/conciliacao/actions&id=desconciliar` fields `Financeiro_Caixas_Extratos_id` + `estornarTitulo` (default 0 = só solta vínculo; 1 também estorna baixa — PERIGO).
+- `query_estornar_pagar` com payload **nested** `fields[Financeiro_Cobrancas_Pagar][idCobrancaPagar|idCaixaBaixa|dsMotivoEstorno]` (flat falhou).
+- `query_extrato_periodo` (`modo=periodo`) lista Conciliado+Falta+Ajuste; `modo=pendentes` não devolve Conciliado.
+- Parser `isOk` aceita true / 1 / "1".
+
+**Política:** no `simular`/`executar` do dia a tool **NÃO** desliga nem estorna. Reabrir exige flag explícita:
+
+```bash
+python3 tools/conciliar_dia_valenlub.py --reabrir-dia --data YYYY-MM-DD --caixa 4
+# dry-run (default). Para mutar:
+python3 tools/conciliar_dia_valenlub.py --reabrir-dia --executar-reabrir --data YYYY-MM-DD \
+  --estornar-ap 39042,39043
+```
+
+Ordem segura: desligar (`estornarTitulo=0`) → conferir Conciliado=0 → estornar só AP órfão `isEstornavel`.
+
 ## Exceção — tool não fechou
+
 
 Só se a tool devolver `erro`/`stub_noop`/`bloqueio_*` e Breno pedir tela: uma aba, refazer a linha, conferir Conciliado. Não narrar o meio. Não invente UI no happy path.
 
@@ -79,7 +99,7 @@ Se **Pago**: ligue. Pix já baixado sem id no GET: tente ligar pelo valor na cen
 
 ## Tarifa duplicada (humano)
 
-Gate ≥2: manter o id mais antigo; **estornar** os mais novos na 1200. Tool NÃO estorna — só orienta ids.
+Gate ≥2: manter o id mais antigo; **estornar** os mais novos na 1200. No fluxo do dia: só orienta ids. Estorno/desligar só com --reabrir-dia explícito.
 
 ## Resgate — lançar e baixar
 
@@ -132,7 +152,7 @@ Aplicação (`APLIC.INVEST FACIL` / `APLICACAO` / `APLIC.`): GRAVAR 1200 (ver se
 
 ## Não fazer
 
-Não estorna. Não grava DNI. Não edite título Pago. Não escolha entre vários.
+Não estorna no fluxo do dia (só com --reabrir-dia --executar-reabrir). Não grava DNI. Não edite título Pago. Não escolha entre vários.
 Não procure um título no valor do lote de boleto crédito.
 Não use fallback “≈5%” em cartão.
 Não invente baixa 1100 de Pix/DEP de cliente (só ARIADNA com id).

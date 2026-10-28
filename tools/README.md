@@ -2,7 +2,7 @@
 
 ## `conciliar_dia_valenlub`
 
-Conciliação do caixa 4 (skill `conciliacao-bancaria-valenlub` 1.38.4).
+Conciliação do caixa 4 (skill `conciliacao-bancaria-valenlub` 1.39.0).
 
 ```bash
 # na raiz do cérebro
@@ -29,3 +29,20 @@ hermes plugins enable conciliar-dia-valenlub
 Configure `plugins.entries.conciliar-dia-valenlub.settings.brain_root` se o cérebro não estiver em `/home/hermes/valenlub-segundo-cerebro`.
 
 Alternativa: dropar `tools/conciliar_dia_valenlub.py` no `tools/` do Hermes (há `registry.register` opcional com try/except).
+
+## Reabrir dia (explícito)
+
+Dry-run (lista Conciliado, sem POST mutante):
+
+```bash
+python3 tools/conciliar_dia_valenlub.py --reabrir-dia --data 2026-10-19 --caixa 4
+```
+
+Mutar (desconciliar estornarTitulo=0; opcional estorno AP nested):
+
+```bash
+python3 tools/conciliar_dia_valenlub.py --reabrir-dia --executar-reabrir \
+  --data 2026-10-19 --caixa 4 --estornar-ap 39042,39043
+```
+
+Não entra no fluxo `simular`/`executar` do dia.

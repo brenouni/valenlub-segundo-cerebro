@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conciliação do caixa 4 ValenLub — skill 1.38.4.
+"""Conciliação do caixa 4 ValenLub — skill 1.39.0.
 
 Função principal: conciliar_dia_valenlub(...)
 
@@ -18,6 +18,10 @@ Também lê .env na raiz do cérebro e em ~/.hermes/.env se existirem
 Uso CLI:
   python3 tools/conciliar_dia_valenlub.py \\
     --data 2026-10-21 --ofx /path/dia.ofx --modo simular
+
+  # reabrir dia (explícito; default dry-run — sem POST mutante):
+  python3 tools/conciliar_dia_valenlub.py \\
+    --reabrir-dia --data 2026-10-19 --caixa 4
 """
 from __future__ import annotations
 
@@ -32,7 +36,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen, build_opener, HTTPCookieProcessor
 from http.cookiejar import CookieJar
 
@@ -867,7 +871,7 @@ def carregar_query(
     """GETs read-only. Retorna (receber, pagar, avisos).
 
     Exige QUERY_TENANT e (QUERY_TOKEN ou QUERY_USER+QUERY_PASS).
-    Skill 1.38.4: além da janela dt_baixa do dia, busca suplementar
+    Skill 1.39.0: além da janela dt_baixa do dia, busca suplementar
     statusCobranca=Aberto,Pago por vencimento (~45d) e cobrança (~7d)
     para achar CCR Pago com dtBaixa=null e Pix/DEP Abertos.
     """
@@ -1447,6 +1451,54 @@ def _mgerencia_get_json(opener: Any, path_qs: str) -> Any:
     return json.loads(raw)
 
 
+def _parse_is_ok(resp: str | dict | None) -> tuple[bool | None, str, dict]:
+    """Parse isOk aceitando true/1/"1" (e variantes). Retorna (ok, message, data)."""
+    data: dict = {}
+    text = ""
+    if isinstance(resp, dict):
+        data = resp
+    else:
+        text = (resp or "").strip() if isinstance(resp, str) else str(resp or "")
+        try:
+            parsed = json.loads(text) if text and text[0] in "{[" else {}
+            if isinstance(parsed, list):
+                data = {"_list": parsed}
+            elif isinstance(parsed, dict):
+                data = parsed
+            else:
+                data = {"_raw": text[:500]}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            data = {"_raw": text[:500]}
+    ok_raw = None
+    if isinstance(data, dict):
+        ok_raw = data.get("isOk")
+        if ok_raw is None:
+            ok_raw = data.get("ok")
+    msg = ""
+    if isinstance(data, dict):
+        msg = str(data.get("message") or data.get("msg") or data.get("erro") or "")
+    ok: bool | None = None
+    if isinstance(ok_raw, bool):
+        ok = ok_raw
+    elif isinstance(ok_raw, (int, float)):
+        ok = bool(ok_raw)
+    elif isinstance(ok_raw, str):
+        low = ok_raw.strip().lower()
+        if low in ("1", "true", "ok", "sim", "yes"):
+            ok = True
+        elif low in ("0", "false", "nao", "não", "no"):
+            ok = False
+    if ok is None and text:
+        compact = text.lower().replace(" ", "")
+        if '"isok":1' in compact or '"isok":true' in compact:
+            ok = True
+        elif '"isok":0' in compact or '"isok":false' in compact:
+            ok = False
+        elif "[sucesso]" in text.lower() or "sucesso" in text.lower():
+            ok = True
+    return ok, msg, data if isinstance(data, dict) else {}
+
+
 def query_extrato_pendente(
     opener: Any,
     *,
@@ -1462,6 +1514,62 @@ def query_extrato_pendente(
     payload = _mgerencia_get_json(opener, path)
     txs = payload.get("transacoes") if isinstance(payload, dict) else None
     return list(txs or [])
+
+
+def query_extrato_periodo(
+    opener: Any,
+    *,
+    id_caixa: str,
+    data_extrato: str,
+    max_pages: int = 30,
+) -> list[dict]:
+    """GET extrato.json modo=periodo — Conciliado + Falta + Ajuste (paginado).
+
+    modo=pendentes NÃO devolve Conciliado. Use este helper para reabrir/inventário.
+    """
+    peri = _data_periodo_br(data_extrato)
+    txs: list[dict] = []
+    cursor = ""
+    seen_cursors: set[str] = set()
+    for _ in range(max_pages):
+        cur_q = quote(cursor, safe="")
+        path = (
+            f"pure/financeiro/conciliacao/extrato.json&idCaixa={id_caixa}"
+            f"&modo=periodo&dtPeriodo={peri}%2C{peri}"
+            f"&cursor={cur_q}&comSugestoes=0"
+        )
+        payload = _mgerencia_get_json(opener, path)
+        batch = list(payload.get("transacoes") or []) if isinstance(payload, dict) else []
+        txs.extend(batch)
+        nxt = ""
+        if isinstance(payload, dict):
+            nxt = str(
+                payload.get("cursor")
+                or payload.get("next_cursor")
+                or payload.get("nextCursor")
+                or ""
+            )
+            pag = payload.get("paginacao") or payload.get("pagination") or {}
+            if isinstance(pag, dict) and not nxt:
+                nxt = str(
+                    pag.get("cursor") or pag.get("next") or pag.get("next_cursor") or ""
+                )
+        if not nxt or nxt in seen_cursors:
+            break
+        seen_cursors.add(nxt)
+        cursor = nxt
+        if not batch:
+            break
+    out: list[dict] = []
+    seen: set[str] = set()
+    for t in txs:
+        iid = str(t.get("id") or "")
+        if iid and iid not in seen:
+            seen.add(iid)
+            out.append(t)
+        elif not iid:
+            out.append(t)
+    return out
 
 
 def query_movimentacoes_para_alvo(
@@ -1559,6 +1667,30 @@ def query_conciliar_lote(
     return _post_urlencoded(opener, url, fields)
 
 
+def query_desconciliar(
+    opener: Any,
+    *,
+    id_extrato: str | int,
+    estornar_titulo: int = 0,
+) -> str:
+    """POST actions&id=desconciliar — soltar vínculo extrato↔título (captura 1311).
+
+    Default estornarTitulo=0: só desliga. estornarTitulo=1 também estorna a baixa do título
+    (PERIGO). No fluxo de reabrir dia use sempre 0; estorne AP órfão depois via
+    query_estornar_pagar.
+    """
+    if int(estornar_titulo) not in (0, 1):
+        raise ValueError("estornar_titulo deve ser 0 ou 1")
+    fields = {
+        "Financeiro_Caixas_Extratos_id": str(id_extrato),
+        "estornarTitulo": str(int(estornar_titulo)),
+    }
+    url = (
+        f"{_mgerencia_base()}"
+        "/scripts/financeiro/conciliacao/actions&id=desconciliar"
+    )
+    return _post_urlencoded(opener, url, fields)
+
 
 def query_estornar_pagar(
     opener: Any,
@@ -1570,12 +1702,16 @@ def query_estornar_pagar(
     """POST estornar contas a pagar (captura 1200).
 
     Endpoint: /mgerencia/scripts/financeiro/cobrancas_pagar/actions/estornar
-    Fields: idCobrancaPagar, idCaixaBaixa, dsMotivoEstorno.
+    Payload nested (flat falhou em produção 19/10):
+      fields[Financeiro_Cobrancas_Pagar][idCobrancaPagar|idCaixaBaixa|dsMotivoEstorno]
     """
+    prefix = "fields[Financeiro_Cobrancas_Pagar]"
     fields = {
-        "idCobrancaPagar": str(id_cobranca_pagar),
-        "idCaixaBaixa": str(id_caixa_baixa if id_caixa_baixa is not None else _ID_CAIXA),
-        "dsMotivoEstorno": ds_motivo_estorno,
+        f"{prefix}[idCobrancaPagar]": str(id_cobranca_pagar),
+        f"{prefix}[idCaixaBaixa]": str(
+            id_caixa_baixa if id_caixa_baixa is not None else _ID_CAIXA
+        ),
+        f"{prefix}[dsMotivoEstorno]": ds_motivo_estorno,
     }
     url = (
         f"{_mgerencia_base()}"
@@ -1632,16 +1768,20 @@ def _achar_extrato_por_valor(
 
 
 def _parse_conciliar_ok(resp: str, item: dict) -> bool:
-    ok = False
-    try:
-        js = json.loads(resp)
-        ok = bool(js.get("isOk")) or "sucesso" in str(js.get("message") or "").lower()
-        item["resposta"] = json.dumps(js, ensure_ascii=False)[:300]
-        item["vinculadas"] = js.get("vinculadas")
-    except json.JSONDecodeError:
-        ok = "[Sucesso]" in resp or "sucesso" in (resp or "").lower()
+    ok_flag, msg, data = _parse_is_ok(resp)
+    if data and "_raw" not in data:
+        item["resposta"] = json.dumps(data, ensure_ascii=False)[:300]
+        item["vinculadas"] = data.get("vinculadas")
+    else:
         item["resposta"] = (resp or "")[:300]
-    return ok
+    if ok_flag is True:
+        return True
+    if ok_flag is False:
+        return False
+    # fallback textual
+    return "[Sucesso]" in (resp or "") or "sucesso" in (resp or "").lower() or (
+        "sucesso" in (msg or "").lower()
+    )
 
 
 def _achar_mov_ids(
@@ -3257,7 +3397,7 @@ def conciliar_dia_valenlub(
     cielo_csv_path: str | None = None,
     modo: str = "simular",
 ) -> ResultadoConciliacao:
-    """Concilia o caixa 4 do dia. Skill 1.38.4.
+    """Concilia o caixa 4 do dia. Skill 1.39.0.
 
     modo: "simular" (default) ou "executar".
     """
@@ -3419,6 +3559,134 @@ def conciliar_dia_valenlub(
     )
 
 
+
+# ---------------------------------------------------------------------------
+# Reabrir dia (explícito) — NÃO entra no fluxo executar/simular
+# ---------------------------------------------------------------------------
+
+def reabrir_dia(
+    *,
+    data: str,
+    caixa: int = 4,
+    estornar_ap_ids: list[str | int] | None = None,
+    dry_run: bool = True,
+    ds_motivo_estorno: str = "Reabrir dia — Atlas",
+) -> dict[str, Any]:
+    """Desliga Conciliado (estornarTitulo=0) e opcionalmente estorna AP órfãos.
+
+    Exige chamada explícita (CLI --reabrir-dia). Nunca é chamado por
+    conciliar_dia_valenlub em modo simular/executar.
+    dry_run=True (default): só lista; dry_run=False + --executar-reabrir: muta.
+    """
+    _ensure_env()
+    global _ID_CAIXA
+    _ID_CAIXA = str(caixa)
+    opener = mgerencia_session()
+    id_caixa = str(caixa)
+    txs = query_extrato_periodo(opener, id_caixa=id_caixa, data_extrato=data)
+    dist: dict[str, int] = {}
+    for t in txs:
+        st = str(t.get("status") or "?")
+        dist[st] = dist.get(st, 0) + 1
+    ids_conciliado = [
+        str(t.get("id")) for t in txs if str(t.get("status")) == "Conciliado" and t.get("id")
+    ]
+    out: dict[str, Any] = {
+        "data": data,
+        "caixa": caixa,
+        "dry_run": dry_run,
+        "extrato_antes": {
+            "n_total": len(txs),
+            "dist": dist,
+            "n_conciliado": dist.get("Conciliado", 0),
+            "ids_conciliado": ids_conciliado,
+        },
+        "desconciliar": {"ok": [], "falhas": [], "planejado": ids_conciliado},
+        "estornos_ap": {"ok": [], "falhas": [], "pulados": [], "planejado": []},
+    }
+    if dry_run:
+        out["veredito_pt"] = (
+            f"[dry-run] {len(ids_conciliado)} Conciliado p/ desligar "
+            f"(estornarTitulo=0); extrato dist={dist}. Sem POST mutante."
+        )
+        if estornar_ap_ids:
+            out["estornos_ap"]["planejado"] = [str(i) for i in estornar_ap_ids]
+            out["veredito_pt"] += (
+                f" AP planejados p/ estornar após desligar: "
+                f"{', '.join(str(i) for i in estornar_ap_ids)}."
+            )
+        return out
+
+    for iid in ids_conciliado:
+        try:
+            raw = query_desconciliar(opener, id_extrato=iid, estornar_titulo=0)
+            ok_flag, msg, data_js = _parse_is_ok(raw)
+            entry = {"id": iid, "isOk": ok_flag, "message": msg, "snip": (raw or "")[:200]}
+            if ok_flag is True:
+                out["desconciliar"]["ok"].append(entry)
+            else:
+                out["desconciliar"]["falhas"].append(entry)
+        except Exception as e:  # noqa: BLE001
+            out["desconciliar"]["falhas"].append({"id": iid, "erro": str(e)})
+
+    txs2 = query_extrato_periodo(opener, id_caixa=id_caixa, data_extrato=data)
+    dist2: dict[str, int] = {}
+    for t in txs2:
+        st = str(t.get("status") or "?")
+        dist2[st] = dist2.get(st, 0) + 1
+    out["extrato_depois_desligar"] = {
+        "n_total": len(txs2),
+        "dist": dist2,
+        "n_conciliado": dist2.get("Conciliado", 0),
+    }
+
+    if estornar_ap_ids:
+        if dist2.get("Conciliado", 0) > 0:
+            out["estornos_ap"]["pulados"].append(
+                {
+                    "motivo": f"ABORT: ainda Conciliado={dist2.get('Conciliado')}",
+                    "ids": [str(i) for i in estornar_ap_ids],
+                }
+            )
+        else:
+            for mid in estornar_ap_ids:
+                try:
+                    raw = query_estornar_pagar(
+                        opener,
+                        id_cobranca_pagar=mid,
+                        id_caixa_baixa=caixa,
+                        ds_motivo_estorno=ds_motivo_estorno,
+                    )
+                    low = (raw or "").lower()
+                    entry = {"id": str(mid), "snip": (raw or "")[:300]}
+                    if (
+                        "[sucesso]" in low
+                        or "estornada com sucesso" in low
+                        or "já foi estornado" in low
+                        or "ja foi estornado" in low
+                    ):
+                        out["estornos_ap"]["ok"].append(entry)
+                    else:
+                        ok_flag, msg, _ = _parse_is_ok(raw)
+                        entry["isOk"] = ok_flag
+                        entry["message"] = msg
+                        if ok_flag is True:
+                            out["estornos_ap"]["ok"].append(entry)
+                        else:
+                            out["estornos_ap"]["falhas"].append(entry)
+                except Exception as e:  # noqa: BLE001
+                    out["estornos_ap"]["falhas"].append({"id": str(mid), "erro": str(e)})
+
+    out["veredito_pt"] = (
+        f"desligar ok={len(out['desconciliar']['ok'])} "
+        f"falhas={len(out['desconciliar']['falhas'])}; "
+        f"Conciliado depois={dist2.get('Conciliado', 0)}; "
+        f"estorno AP ok={len(out['estornos_ap']['ok'])} "
+        f"falhas={len(out['estornos_ap']['falhas'])}."
+    )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Registro opcional no Hermes tools/ (registry.register)
 # ---------------------------------------------------------------------------
@@ -3438,7 +3706,7 @@ def _hermes_handler(args: dict, **kwargs) -> str:  # noqa: ARG001
 _HERMES_SCHEMA = {
     "name": "conciliar_dia_valenlub",
     "description": (
-        "Concilia o caixa 4 ValenLub no dia informado (skill 1.38.4). "
+        "Concilia o caixa 4 ValenLub no dia informado (skill 1.39.0). "
         "Lê OFX, GET Query contas-receber/contas-a-pagar, decide GRAVAR/ARIADNA, "
         "executa ou simula, gera PDF no visual aprovado."
     ),
@@ -3483,13 +3751,52 @@ def _cli() -> int:
 
     p = argparse.ArgumentParser(description="Conciliação caixa 4 ValenLub")
     p.add_argument("--data", required=True)
-    p.add_argument("--ofx", required=True, dest="ofx_path")
+    p.add_argument("--ofx", dest="ofx_path", default=None)
     p.add_argument("--caixa", type=int, default=4)
     p.add_argument("--pdf", dest="pdf_path", default=None)
     p.add_argument("--cielo", dest="cielo_csv_path", default=None)
     p.add_argument("--modo", choices=("simular", "executar"), default="simular")
     p.add_argument("--json-out", dest="json_out", default=None)
+    p.add_argument(
+        "--reabrir-dia",
+        action="store_true",
+        help="Modo explícito: listar/desligar Conciliado (não usa OFX). Default dry-run.",
+    )
+    p.add_argument(
+        "--executar-reabrir",
+        action="store_true",
+        help="Com --reabrir-dia: efetivar desconciliar (estornarTitulo=0). Sem isto = dry-run.",
+    )
+    p.add_argument(
+        "--estornar-ap",
+        dest="estornar_ap",
+        default=None,
+        help="Com --reabrir-dia --executar-reabrir: ids AP órfãos p/ estornar (csv).",
+    )
     args = p.parse_args()
+
+    if args.reabrir_dia:
+        ids = None
+        if args.estornar_ap:
+            ids = [x.strip() for x in str(args.estornar_ap).split(",") if x.strip()]
+        payload = reabrir_dia(
+            data=args.data,
+            caixa=args.caixa,
+            estornar_ap_ids=ids,
+            dry_run=not args.executar_reabrir,
+        )
+        text = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+        if args.json_out:
+            Path(args.json_out).write_text(text, encoding="utf-8")
+        print(text)
+        falhas = len(payload.get("desconciliar", {}).get("falhas") or []) + len(
+            payload.get("estornos_ap", {}).get("falhas") or []
+        )
+        return 0 if falhas == 0 else 1
+
+    if not args.ofx_path:
+        p.error("--ofx é obrigatório (exceto com --reabrir-dia)")
+
     res = conciliar_dia_valenlub(
         data=args.data,
         ofx_path=args.ofx_path,
