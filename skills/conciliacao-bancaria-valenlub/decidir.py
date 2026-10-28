@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decide a conciliação. O agente não escolhe. Fonte: skill 1.39.3."""
+"""Decide a conciliação. O agente não escolhe. Fonte: skill 1.39.4."""
 import json
 import re
 import sys
@@ -81,7 +81,7 @@ def _parts_dia(s):
 
 
 def mesmo_dia_quando_ha(linha_data, tit_data):
-    """Data do título obrigatória (skill 1.39.3). Sem data → não casa."""
+    """Data do título obrigatória (skill 1.39.4). Sem data → não casa."""
     if not (tit_data or "").strip():
         return False
     if not (linha_data or "").strip():
@@ -170,7 +170,7 @@ def _pick_nome(cand, nome):
 
 
 def decidir(ext, rec, pag):
-    """Aplica a skill 1.39.3. Retorna lista de linhas com veredito/acao/id."""
+    """Aplica a skill 1.39.4. Retorna lista de linhas com veredito/acao/id."""
     desdobra = pares_cartao(ext, rec)
     out = []
     for i, linha in enumerate(ext):
@@ -315,6 +315,7 @@ def decidir(ext, rec, pag):
             continue
 
         # Pix / depósito TED-cliente: achar título por valor (Pago ou Aberto)
+        # 1.39.4: Aberto N=1 no valor → GRAVAR baixar+ligar (não ARIADNA).
         if classe in ("pix", "deposito"):
             # 1) mesmo dia
             cand = _match_valor(rec, v, dia_ln, exigir_dia=True)
@@ -325,18 +326,34 @@ def decidir(ext, rec, pag):
             if t is not None:
                 st = status_tit(t).lower()
                 if st.startswith("abert"):
-                    out.append(
-                        {
-                            **linha,
-                            "veredito": "ARIADNA",
-                            "id": t.get("id"),
-                            "acao": (
-                                f"Título {t.get('id')} Aberto no valor {v:.2f}. "
-                                "Baixar na 1100 (Receber Pagamento) e religar. "
-                                "Não inventar baixa automática de cliente."
-                            ),
-                        }
-                    )
+                    # Só N=1 no valor (centavo). Nome que desambigua N>1 → ARIADNA.
+                    if len(cand) == 1:
+                        out.append(
+                            {
+                                **linha,
+                                "veredito": "GRAVAR",
+                                "id": t.get("id"),
+                                "baixa_antes": True,
+                                "acao": (
+                                    f"Título {t.get('id')} Aberto {v:.2f} (N=1). "
+                                    "Baixar 1100 (receber_transaction, juros/multa 0, "
+                                    "caixa 4, idPessoa do título) e ligar Pix 1:1."
+                                ),
+                            }
+                        )
+                    else:
+                        out.append(
+                            {
+                                **linha,
+                                "veredito": "ARIADNA",
+                                "id": t.get("id"),
+                                "acao": (
+                                    f"Título {t.get('id')} Aberto no valor {v:.2f} "
+                                    f"(N={len(cand)} no valor — ambíguo). "
+                                    "Baixar na 1100 e religar. Tool não escolhe entre vários."
+                                ),
+                            }
+                        )
                 else:
                     out.append(
                         {

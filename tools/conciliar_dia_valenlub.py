@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conciliação do caixa 4 ValenLub — skill 1.39.3.
+"""Conciliação do caixa 4 ValenLub — skill 1.39.4.
 
 Função principal: conciliar_dia_valenlub(...)
 
@@ -871,7 +871,7 @@ def carregar_query(
     """GETs read-only. Retorna (receber, pagar, avisos).
 
     Exige QUERY_TENANT e (QUERY_TOKEN ou QUERY_USER+QUERY_PASS).
-    Skill 1.39.3: além da janela dt_baixa do dia, busca suplementar
+    Skill 1.39.4: além da janela dt_baixa do dia, busca suplementar
     statusCobranca=Aberto,Pago por vencimento (~45d) e cobrança (~7d)
     para achar CCR Pago com dtBaixa=null e Pix/DEP Abertos.
     """
@@ -1229,6 +1229,28 @@ def _parse_id_cobranca_sucesso(resp: str) -> str | None:
     return m.group(1) if m else None
 
 
+
+def _id_pessoa_do_titulo(t: dict | None) -> str | None:
+    """idPessoa do título CR (cliente). Preferência: raw.idPessoa → pessoa.id."""
+    if not isinstance(t, dict):
+        return None
+    raw = t.get("raw") if isinstance(t.get("raw"), dict) else {}
+    for src in (t, raw):
+        if not isinstance(src, dict):
+            continue
+        v = src.get("idPessoa") or src.get("id_pessoa")
+        if v is not None and str(v).strip() and str(v).strip() != "0":
+            return str(v).strip()
+    pessoa = t.get("pessoa") if isinstance(t.get("pessoa"), dict) else None
+    if pessoa is None and isinstance(raw.get("pessoa"), dict):
+        pessoa = raw["pessoa"]
+    if isinstance(pessoa, dict):
+        v = pessoa.get("idPessoa") or pessoa.get("id") or pessoa.get("id_pessoa")
+        if v is not None and str(v).strip() and str(v).strip() != "0":
+            return str(v).strip()
+    return None
+
+
 def query_baixar_receber(
     opener: Any,
     *,
@@ -1237,11 +1259,13 @@ def query_baixar_receber(
     data_extrato: str,
     ds_historico: str = "",
     id_caixa: str | int | None = None,
+    id_pessoa: str | int | None = None,
 ) -> str:
     """POST receber_transaction — Receber Pagamento (juros/multa 0, caixa).
 
     Captura Concluir: exige dsHistorico/idHistorico ("Informe um histórico").
     nmCaixa* é dinâmico; idCaixa basta.
+    id_pessoa: cliente do título (Pix Aberto); default Bradesco (receita avulsa).
     """
     data_br = _data_br(data_extrato)
     vr = f"{abs(float(valor)):.2f}"
@@ -1265,7 +1289,9 @@ def query_baixar_receber(
         "fields[Financeiro_Cobrancas_Receber][idCobrancaReceber]": str(id_cobranca),
         "fields[Financeiro_Cobrancas_Receber][idHistorico]": "0",
         "fields[Financeiro_Cobrancas_Receber][dsHistorico]": hist,
-        "fields[Financeiro_Cobrancas_Receber][idPessoa]": _ID_PESSOA_BRADESCO,
+        "fields[Financeiro_Cobrancas_Receber][idPessoa]": str(
+            id_pessoa or _ID_PESSOA_BRADESCO
+        ),
         "fields[Financeiro_Cobrancas_Receber][idFilial]": _ID_FILIAL,
     }
     url = (
@@ -1976,7 +2002,7 @@ def _ligar_titulo_na_linha(
         opener, id_caixa=cx, data_extrato=data_ex, valor=valor, prefer_hist=prefer_hist
     )
     if not tx:
-        # 1.39.3: confirma Conciliado na central (não assume só por ausência de pendente)
+        # 1.39.4: confirma Conciliado na central (não assume só por ausência de pendente)
         if _marcar_ja_conciliado_se_central(
             opener,
             item,
@@ -2113,7 +2139,7 @@ def _contagem_central(
 ) -> dict[str, int]:
     """Contagem live da central (fonte da verdade do cabeçalho PDF/mensagem).
 
-    Skill 1.39.3: Conciliado/Falta/Ajuste vêm do GET periodo — não dos status
+    Skill 1.39.4: Conciliado/Falta/Ajuste vêm do GET periodo — não dos status
     da passagem (que mentem em re-executar de dia já fechado).
     """
     out = {"Conciliado": 0, "Falta": 0, "Ajuste": 0}
@@ -2187,7 +2213,7 @@ def _marcar_ja_conciliado_se_central(
 ) -> bool:
     """Se a linha do extrato já está Conciliado na central → ja_conciliado.
 
-    Retorna True se marcou. Skill 1.39.3 — evita PDF mentiroso em re-executar.
+    Retorna True se marcou. Skill 1.39.4 — evita PDF mentiroso em re-executar.
     """
     tx = _linha_extrato_central(
         opener,
@@ -2583,7 +2609,7 @@ def _ligar_aplicacao(
     ]
     tx = (aplic or cand or [None])[0]
     if not tx:
-        # 1.39.3: pendente sumiu porque já Conciliado — não mente "ligar"
+        # 1.39.4: pendente sumiu porque já Conciliado — não mente "ligar"
         if _marcar_ja_conciliado_se_central(
             opener,
             item,
@@ -3180,7 +3206,7 @@ def _executar_gravar(
                         prefer_hist=("CIELO", "CARTAO", "CARTÃO", "VISA", "MASTER", "ELO", "AMEX", "REDE"),
                     )
                     if not tx:
-                        # 1.39.3: dia já fechado — pendente some; central Conciliado ≠ falta
+                        # 1.39.4: dia já fechado — pendente some; central Conciliado ≠ falta
                         if _marcar_ja_conciliado_se_central(
                             opener,
                             item,
@@ -3313,6 +3339,73 @@ def _executar_gravar(
                 v = abs(float(ln.get("valor") or 0))
                 dia = _data_linha(ln)
                 if tid:
+                    # 1.39.4: título Aberto N=1 → baixar (receber_transaction) + ligar
+                    baixa_antes = bool(ln.get("baixa_antes"))
+                    tit_ref = None
+                    for tt in (receber or []):
+                        if str(tt.get("id") or "") == str(tid):
+                            tit_ref = tt
+                            break
+                    st_tit = ""
+                    raw_t: dict = {}
+                    if tit_ref is not None:
+                        st_tit = str(
+                            tit_ref.get("statusCobranca")
+                            or tit_ref.get("status")
+                            or ""
+                        ).lower()
+                        raw_t = (
+                            tit_ref.get("raw")
+                            if isinstance(tit_ref.get("raw"), dict)
+                            else {}
+                        )
+                        if not st_tit:
+                            st_tit = str(raw_t.get("statusCobranca") or "").lower()
+                    if not baixa_antes and st_tit.startswith("abert"):
+                        baixa_antes = True
+                    # re-run: já Pago → só ligar (não baixar de novo)
+                    if baixa_antes and st_tit.startswith("pago"):
+                        baixa_antes = False
+                    if baixa_antes:
+                        id_pes = _id_pessoa_do_titulo(tit_ref)
+                        if not id_pes:
+                            item["status"] = "ariadna"
+                            item["gravou"] = False
+                            item["id_titulo"] = tid
+                            item["tipo"] = "pix_aberto_sem_pessoa"
+                            item["motivo"] = (
+                                f"Pix {v:.2f}: título {tid} Aberto sem idPessoa — "
+                                "não baixei; Ariadna 1100."
+                            )
+                            executados.append(item)
+                            continue
+                        hist = str(
+                            ln.get("nome") or ln.get("memo") or "PIX"
+                        ).strip()[:80] or "PIX"
+                        resp_baixa = query_baixar_receber(
+                            opener,
+                            id_cobranca=str(tid),
+                            valor=v,
+                            data_extrato=dia,
+                            ds_historico=hist,
+                            id_caixa=cx,
+                            id_pessoa=id_pes,
+                        )
+                        ok_b = "[Sucesso]" in (resp_baixa or "")
+                        item["resposta_baixa"] = (resp_baixa or "")[:300]
+                        item["id_pessoa"] = id_pes
+                        item["baixou"] = ok_b
+                        item["endpoint"] = "receber_transaction + conciliar"
+                        if not ok_b:
+                            item["status"] = "erro"
+                            item["gravou"] = False
+                            item["id_titulo"] = tid
+                            item["tipo"] = "pix_baixa_erro"
+                            item["motivo"] = (
+                                f"Pix {v:.2f}: baixa título {tid} sem [Sucesso]."
+                            )
+                            executados.append(item)
+                            continue
                     # tenta ligar; se extrato/mov ausente → ja_pago_painel
                     before = dict(item)
                     item = _ligar_titulo_na_linha(
@@ -3487,7 +3580,7 @@ def _mensagem_fechamento(
     conciliado_pass, falta_pass, fechado_pass, planejado = _contagens_honestas(
         executados, ariadna
     )
-    # 1.39.3: cabeçalho = central live; passagem só detalha o que ainda falta de verdade
+    # 1.39.4: cabeçalho = central live; passagem só detalha o que ainda falta de verdade
     if central is not None:
         conciliado = int(central.get("Conciliado") or 0)
         falta = int(central.get("Falta") or 0)
@@ -3689,7 +3782,7 @@ def _montar_json_pdf(
     conciliado_pass, falta_pass, fechado_pass, planejado = _contagens_honestas(
         executados, ariadna
     )
-    # 1.39.3: cabeçalho = central live (nunca mente em re-executar)
+    # 1.39.4: cabeçalho = central live (nunca mente em re-executar)
     if central is not None:
         conciliado = int(central.get("Conciliado") or 0)
         falta = int(central.get("Falta") or 0)
@@ -3803,7 +3896,7 @@ def conciliar_dia_valenlub(
     cielo_csv_path: str | None = None,
     modo: str = "simular",
 ) -> ResultadoConciliacao:
-    """Concilia o caixa 4 do dia. Skill 1.39.3.
+    """Concilia o caixa 4 do dia. Skill 1.39.4.
 
     modo: "simular" (default) ou "executar".
     """
@@ -3912,7 +4005,7 @@ def conciliar_dia_valenlub(
         gravar, modo, pagar=pagar, receber=receber, id_caixa=caixa
     )
 
-    # 1.39.3: contagem live da central = fonte da verdade do cabeçalho
+    # 1.39.4: contagem live da central = fonte da verdade do cabeçalho
     central: dict[str, int] | None = None
     try:
         opener_c = mgerencia_session()
@@ -4004,7 +4097,7 @@ def relatorio_central_dia(
 ) -> dict[str, Any]:
     """Gera PDF/resumo a partir do GET periodo — zero POST.
 
-    Skill 1.39.3: cabeçalho = Conciliado/Falta/Ajuste da central.
+    Skill 1.39.4: cabeçalho = Conciliado/Falta/Ajuste da central.
     """
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", data or ""):
         return {"ok": False, "erro": "data deve ser YYYY-MM-DD"}
@@ -4235,7 +4328,7 @@ def _hermes_handler(args: dict, **kwargs) -> str:  # noqa: ARG001
 _HERMES_SCHEMA = {
     "name": "conciliar_dia_valenlub",
     "description": (
-        "Concilia o caixa 4 ValenLub no dia informado (skill 1.39.3). "
+        "Concilia o caixa 4 ValenLub no dia informado (skill 1.39.4). "
         "Lê OFX, GET Query contas-receber/contas-a-pagar, decide GRAVAR/ARIADNA, "
         "executa ou simula, gera PDF no visual aprovado."
     ),
@@ -4289,7 +4382,7 @@ def _cli() -> int:
     p.add_argument(
         "--relatorio-central",
         action="store_true",
-        help="Só-leitura: PDF/resumo a partir do GET periodo (zero POST). Skill 1.39.3.",
+        help="Só-leitura: PDF/resumo a partir do GET periodo (zero POST). Skill 1.39.4.",
     )
     p.add_argument(
         "--reabrir-dia",
