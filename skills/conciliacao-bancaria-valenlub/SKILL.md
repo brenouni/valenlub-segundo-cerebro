@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
 description: "Conciliação do caixa 4. Anexo sem texto já é o pedido. Tela que fecha não é falta. Tente de novo."
-version: "1.39.8"
+version: "1.39.9"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -12,7 +12,7 @@ metadata:
 
 # Conciliação — ValenLub, caixa 4
 
-Fonte única. Versão 1.39.8. Você não decide. O script decide.
+Fonte única. Versão 1.39.9. Você não decide. O script decide.
 
 Não narrar passo. Não enviar mensagem de progresso. Não diga “Carrego”, “Vou achar”, “O GET veio”, “Rodo a decisão”.
 Só a mensagem final de fechamento (veredito + PDF). Zero narração de passagem.
@@ -31,9 +31,18 @@ Sem arquivo, pare. Responda sem ser marcado.
 2. Devolva só o campo `mensagem` + caminho do PDF. Zero narração. Zero UI.
 3. Não reimplemente GETs, cliques nem `decidir.py` na tela — a tool faz tudo.
 
-## Tool 1.39.8 (produção)
+## Tool 1.39.9 (produção)
 
-A tool `conciliar_dia_valenlub` (1.39.8) é a execução. Não reimplemente na UI o que a tool já faz.
+A tool `conciliar_dia_valenlub` (1.39.9) é a execução. Não reimplemente na UI o que a tool já faz.
+
+### REGRA DE DATA (1.39.9 — Breno 29/10, vence qualquer outra)
+
+- **Cada dia concilia SÓ o que já está baixado com data de baixa = dia do extrato.** Nada do dia anterior, nada do dia posterior.
+- Já vêm baixados e disponíveis para conciliar: **liquidação de cobrança** (movs `PAGTO*` do retorno), **receita de cartão** (RECEBIMENTO/CARTÃO/CIELO) e **Pix já Pago**. Para esses o robô **só liga pelo valor**.
+- O robô **NUNCA** altera data de baixa, **nunca** move pagamento de uma data para outra, **nunca** re-baixa o que já está Pago.
+- Se o valor do extrato não fecha com os itens do mesmo dia: **não liga parcial e não busca outros dias** → ARIADNA com a diferença (extrato − soma do dia).
+- Código: `_mov_mesmo_dia()` filtra toda busca de movimentação (`_achar_mov_ids`, cartão painel, liquidação). Sem fallback para outras datas.
+- Baixas novas permitidas continuam só as já previstas: tarifa/aplicação/rentabilidade (criar) e Pix Aberto N=1 com emissão no dia (1100). **Sem baixa automática de contas a pagar.**
 
 - GET paginado: (1) `dt_baixa` do dia; (2) suplementar `statusCobranca=Aberto,Pago` por vencimento (~45d) e cobrança (~7d). Merge por id. Cache em `cache/conciliacao/`.
 - Gate 0/1/N (aplicação 30060005, tarifa 30060001, resgate/rentabilidade 30060006): 0 cria, 1 só liga, ≥2 bloqueia. Mensagem lista **manter** (id mais antigo) e **estornar** (demais) na 1200/1100. Tool NÃO estorna no fluxo do dia (helpers de desconciliar/estornar/reabrir existem, mas exigem flag explícita).
@@ -191,7 +200,7 @@ Após `git pull` da skill/tool no VPS, **sempre** reiniciar o gateway — o Pyth
 
 ```bash
 systemctl --user restart hermes-gateway.service
-# prova: PID novo + versão em memória = disco (smoke 1.39.8)
+# prova: PID novo + versão em memória = disco (smoke 1.39.9)
 ```
 
 Falha clássica (28/10): disco em 1.39.1, gateway sem restart desde 24/10 → `receber_query` ~50 em vez de ~5040; 9 linhas «sem título».

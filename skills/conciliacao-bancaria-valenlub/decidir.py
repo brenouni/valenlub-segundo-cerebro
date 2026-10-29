@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decide a conciliação. O agente não escolhe. Fonte: skill 1.39.8."""
+"""Decide a conciliação. O agente não escolhe. Fonte: skill 1.39.9."""
 import json
 import re
 import sys
@@ -117,7 +117,7 @@ def _parts_dia(s):
 
 
 def mesmo_dia_quando_ha(linha_data, tit_data):
-    """Data do título obrigatória (skill 1.39.8). Sem data → não casa."""
+    """Data do título obrigatória (skill 1.39.9). Sem data → não casa."""
     if not (tit_data or "").strip():
         return False
     if not (linha_data or "").strip():
@@ -206,7 +206,7 @@ def _pick_nome(cand, nome):
 
 
 def decidir(ext, rec, pag):
-    """Aplica a skill 1.39.8. Retorna lista de linhas com veredito/acao/id."""
+    """Aplica a skill 1.39.9. Retorna lista de linhas com veredito/acao/id."""
     desdobra = pares_cartao(ext, rec)
     out = []
     for i, linha in enumerate(ext):
