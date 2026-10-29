@@ -8,9 +8,9 @@
 | Compras | memory/context/business/compras.md |
 | Faturamento | memory/context/business/faturamento.md |
 | O que a empresa é | memory/context/business/valenlub.md |
-| Regra de execução da conciliação | skills/conciliacao-bancaria-valenlub/SKILL.md versão 1.39.4 |
+| Regra de execução da conciliação | skills/conciliacao-bancaria-valenlub/SKILL.md versão 1.39.5 |
 | Pessoas | memory/context/people/ |
 | Fila | memory/context/pendencias.md |
 
-A skill 1.39.4 vence qualquer texto deste MAPA na hora de decidir baixa.
+A skill 1.39.5 vence qualquer texto deste MAPA na hora de decidir baixa.
 Tela que fecha tenta de novo. Só a mensagem final de fechamento (veredito + PDF).

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conciliação do caixa 4 ValenLub — skill 1.39.4.
+"""Conciliação do caixa 4 ValenLub — skill 1.39.5.
 
 Função principal: conciliar_dia_valenlub(...)
 
@@ -871,7 +871,7 @@ def carregar_query(
     """GETs read-only. Retorna (receber, pagar, avisos).
 
     Exige QUERY_TENANT e (QUERY_TOKEN ou QUERY_USER+QUERY_PASS).
-    Skill 1.39.4: além da janela dt_baixa do dia, busca suplementar
+    Skill 1.39.5: além da janela dt_baixa do dia, busca suplementar
     statusCobranca=Aberto,Pago por vencimento (~45d) e cobrança (~7d)
     para achar CCR Pago com dtBaixa=null e Pix/DEP Abertos.
     """
@@ -2139,7 +2139,7 @@ def _contagem_central(
 ) -> dict[str, int]:
     """Contagem live da central (fonte da verdade do cabeçalho PDF/mensagem).
 
-    Skill 1.39.4: Conciliado/Falta/Ajuste vêm do GET periodo — não dos status
+    Skill 1.39.5: Conciliado/Falta/Ajuste vêm do GET periodo — não dos status
     da passagem (que mentem em re-executar de dia já fechado).
     """
     out = {"Conciliado": 0, "Falta": 0, "Ajuste": 0}
@@ -2213,7 +2213,7 @@ def _marcar_ja_conciliado_se_central(
 ) -> bool:
     """Se a linha do extrato já está Conciliado na central → ja_conciliado.
 
-    Retorna True se marcou. Skill 1.39.4 — evita PDF mentiroso em re-executar.
+    Retorna True se marcou. Skill 1.39.5 — evita PDF mentiroso em re-executar.
     """
     tx = _linha_extrato_central(
         opener,
@@ -2245,7 +2245,7 @@ def _eh_pagto_mov(m: dict) -> bool:
 def _gravar_liquidacao(
     opener: Any, item: dict, ln: dict, *, id_caixa: str | int | None = None
 ) -> dict:
-    """Lote de boleto: extrato + SOMENTE movs PAGTO* (nunca Pix/cartão); POST conciliar."""
+    """Lote de boleto: extrato + SOMENTE movs PAGTO* do MESMO DIA (nunca Pix/cartão/outras datas); POST conciliar."""
     cx = _caixa_str(id_caixa)
     data_ex = _data_linha(ln)
     valor = abs(float(ln.get("valor") or 0))
@@ -2344,31 +2344,28 @@ def _gravar_liquidacao(
         )
         return item
 
-    # Ariadna: TODOS os PAGTO (não só mesmo dia). Mesmo-dia entra primeiro no subset.
+    # Ariadna: TODOS os PAGTO* = todos que INICIAM com PAGTO, do MESMO DIA do extrato.
+    # Nunca misturar datas (bug 1.38.3/b54730a lia "todos" como todas as datas).
     mesmo_dia = [
         (i, v) for (i, v, dt) in filtrados
         if dia_br in dt or dt.replace("-", "/") == dia_br or dt[0:10] == data_ex[:10]
     ]
-    outros = [
-        (i, v) for (i, v, dt) in filtrados
-        if not (dia_br in dt or dt.replace("-", "/") == dia_br or dt[0:10] == data_ex[:10])
-    ]
-    pool = mesmo_dia + outros  # prioriza dia na ordem do backtrack
+    pool = mesmo_dia
     soma_pool = round(sum(v for _, v in pool), 2)
     ids = None
     if abs(soma_pool - valor) <= 0.02 and pool:
         ids = [i for i, _ in pool]
-    if not ids and mesmo_dia:
-        ids = _subset_sum_ids(mesmo_dia, valor, limite=120)
-    if not ids:
+    if not ids and pool:
         ids = _subset_sum_ids(pool, valor, limite=120)
     if not ids:
+        n_outros = len(filtrados) - len(mesmo_dia)
         item["status"] = "erro"
         item["gravou"] = False
         item["motivo"] = (
-            f"Lote PAGTO sem combinação que feche {valor:.2f} "
-            f"(pagto={len(pool)}, dia={len(mesmo_dia)}, soma={soma_pool:.2f}, "
-            f"extrato={id_extrato})."
+            f"Lote PAGTO sem combinação do mesmo dia que feche {valor:.2f} "
+            f"(pagto_dia={len(mesmo_dia)}, outros_dias_ignorados={n_outros}, "
+            f"soma_dia={soma_pool:.2f}, extrato={id_extrato}). "
+            "Ariadna: só PAGTO do dia do extrato."
         )
         item["id_extrato"] = id_extrato
         return item
@@ -3896,7 +3893,7 @@ def conciliar_dia_valenlub(
     cielo_csv_path: str | None = None,
     modo: str = "simular",
 ) -> ResultadoConciliacao:
-    """Concilia o caixa 4 do dia. Skill 1.39.4.
+    """Concilia o caixa 4 do dia. Skill 1.39.5.
 
     modo: "simular" (default) ou "executar".
     """
@@ -4097,7 +4094,7 @@ def relatorio_central_dia(
 ) -> dict[str, Any]:
     """Gera PDF/resumo a partir do GET periodo — zero POST.
 
-    Skill 1.39.4: cabeçalho = Conciliado/Falta/Ajuste da central.
+    Skill 1.39.5: cabeçalho = Conciliado/Falta/Ajuste da central.
     """
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", data or ""):
         return {"ok": False, "erro": "data deve ser YYYY-MM-DD"}
@@ -4328,7 +4325,7 @@ def _hermes_handler(args: dict, **kwargs) -> str:  # noqa: ARG001
 _HERMES_SCHEMA = {
     "name": "conciliar_dia_valenlub",
     "description": (
-        "Concilia o caixa 4 ValenLub no dia informado (skill 1.39.4). "
+        "Concilia o caixa 4 ValenLub no dia informado (skill 1.39.5). "
         "Lê OFX, GET Query contas-receber/contas-a-pagar, decide GRAVAR/ARIADNA, "
         "executa ou simula, gera PDF no visual aprovado."
     ),
@@ -4382,7 +4379,7 @@ def _cli() -> int:
     p.add_argument(
         "--relatorio-central",
         action="store_true",
-        help="Só-leitura: PDF/resumo a partir do GET periodo (zero POST). Skill 1.39.4.",
+        help="Só-leitura: PDF/resumo a partir do GET periodo (zero POST). Skill 1.39.5.",
     )
     p.add_argument(
         "--reabrir-dia",

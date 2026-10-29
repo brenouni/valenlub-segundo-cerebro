@@ -1,7 +1,7 @@
 ---
 name: conciliacao-bancaria-valenlub
 description: "Conciliação do caixa 4. Anexo sem texto já é o pedido. Tela que fecha não é falta. Tente de novo."
-version: "1.39.4"
+version: "1.39.5"
 author: Breno Alencar, Hermes Agent
 license: Proprietary
 platforms: [linux]
@@ -12,7 +12,7 @@ metadata:
 
 # Conciliação — ValenLub, caixa 4
 
-Fonte única. Versão 1.39.4. Você não decide. O script decide.
+Fonte única. Versão 1.39.5. Você não decide. O script decide.
 
 Não narrar passo. Não enviar mensagem de progresso. Não diga “Carrego”, “Vou achar”, “O GET veio”, “Rodo a decisão”.
 Só a mensagem final de fechamento (veredito + PDF). Zero narração de passagem.
@@ -31,15 +31,16 @@ Sem arquivo, pare. Responda sem ser marcado.
 2. Devolva só o campo `mensagem` + caminho do PDF. Zero narração. Zero UI.
 3. Não reimplemente GETs, cliques nem `decidir.py` na tela — a tool faz tudo.
 
-## Tool 1.39.4 (produção)
+## Tool 1.39.5 (produção)
 
-A tool `conciliar_dia_valenlub` (1.39.4) é a execução. Não reimplemente na UI o que a tool já faz.
+A tool `conciliar_dia_valenlub` (1.39.5) é a execução. Não reimplemente na UI o que a tool já faz.
 
 - GET paginado: (1) `dt_baixa` do dia; (2) suplementar `statusCobranca=Aberto,Pago` por vencimento (~45d) e cobrança (~7d). Merge por id. Cache em `cache/conciliacao/`.
 - Gate 0/1/N (aplicação 30060005, tarifa 30060001, resgate/rentabilidade 30060006): 0 cria, 1 só liga, ≥2 bloqueia. Mensagem lista **manter** (id mais antigo) e **estornar** (demais) na 1200/1100. Tool NÃO estorna no fluxo do dia (helpers de desconciliar/estornar/reabrir existem, mas exigem flag explícita).
 - Depois de criar, parse do id + `conciliar` com `prefer_hist` (APLIC/TARIFA/RESGATE).
 - Cartão: casa líquido ±0,02 ou bruto Cielo (CSV). **Sem fallback 5%**. Desdobro só com evidência Cielo/parcela ou acao Desdobre. N títulos → 1 OFX (±0,02) = agregação (multi-id). Sem título único no Query: se já baixado no painel → **só ligar** (mov 1:1 RECEBIMENTO/CARTÃO/CIELO); 0 ou 2+ movs → ARIADNA. Não baixar de novo.
 - Pix / DEPOSIT TED: título Pago → liga; título **Aberto N=1** no valor (centavo) → **GRAVAR** baixar 1100 (`receber_transaction` com `idPessoa` do título, juros/multa 0, caixa 4) + ligar 1:1. N≠1 / ambíguo → ARIADNA. Sem título → tenta ligar pelo valor; senão ARIADNA.
+- Liquidação crédito: lote **só PAGTO\* do mesmo dia** do extrato (prefixo PAGTO; sem Pix/cartão; **sem outras datas**). Soma/subset só no dia; se não fecha → ARIADNA.
 - Débito `PAGTO ELETRON` / cobrança saída → classe `pagar` (AP por valor); não lote PAGTO crédito.
 - PDF/mensagem: `conciliado` = só `gravado`; `planejado` = `simulado`; `falta` inclui stub/bloqueio/desdobro/erro/ja_*; fechado só se falta=0, planejado=0 e conciliado≥1.
 - Só a mensagem final + PDF. Zero narração de passagem.
@@ -93,7 +94,7 @@ Não inventar título 1100 de cartão.
 ## Lote de boleto (crédito)
 
 Não procure um título no valor da linha.
-Selecione **somente** os recebimentos cujo histórico **inicia com `PAGTO`** (retorno de boletos).
+Selecione **somente** os recebimentos do **mesmo dia do extrato** cujo histórico **inicia com `PAGTO`** (retorno de boletos). “Todos os PAGTO” = todos com esse prefixo **no dia** — nunca outras datas.
 **Nunca** incluir no lote: Pix, CR avulso, `RECEBIMENTO DE CARTÃO`, Cielo/Master/Amex.
 Desmarque cartão e qualquer mov que não comece com `PAGTO`.
 Soma bate no centavo: ligue.
@@ -104,7 +105,7 @@ Painel sem PAGTO de boleto, ou soma diferente: Ariadna. Não force. Não ligue p
 
 Não é liquidação de boleto crédito. Ache o AP no valor (±0,02) e ligue. 0 AP → Ariadna 1200.
 
-## Pix Aberto / DEPOSIT cliente (1.39.4)
+## Pix Aberto / DEPOSIT cliente (1.39.5)
 
 Preferência: Pix **N=1** no valor (centavo) → **baixar + ligar** na tool; cartão Pago 1:1 `RECEBIMENTO DE CARTÃO` → só ligar no líquido (não baixar de novo).
 
@@ -190,12 +191,12 @@ Após `git pull` da skill/tool no VPS, **sempre** reiniciar o gateway — o Pyth
 
 ```bash
 systemctl --user restart hermes-gateway.service
-# prova: PID novo + versão em memória = disco (smoke 1.39.4)
+# prova: PID novo + versão em memória = disco (smoke 1.39.5)
 ```
 
 Falha clássica (28/10): disco em 1.39.1, gateway sem restart desde 24/10 → `receber_query` ~50 em vez de ~5040; 9 linhas «sem título».
 
-## PDF / cabeçalho = central live (1.39.4)
+## PDF / cabeçalho = central live (1.39.5)
 
 O PDF **não pode mentir**. Cabeçalho Conciliado/Falta/Ajuste = GET `query_extrato_periodo` (central Omie), **não** a contagem da passagem.
 

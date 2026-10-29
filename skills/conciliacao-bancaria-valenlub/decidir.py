@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decide a conciliação. O agente não escolhe. Fonte: skill 1.39.4."""
+"""Decide a conciliação. O agente não escolhe. Fonte: skill 1.39.5."""
 import json
 import re
 import sys
@@ -81,7 +81,7 @@ def _parts_dia(s):
 
 
 def mesmo_dia_quando_ha(linha_data, tit_data):
-    """Data do título obrigatória (skill 1.39.4). Sem data → não casa."""
+    """Data do título obrigatória (skill 1.39.5). Sem data → não casa."""
     if not (tit_data or "").strip():
         return False
     if not (linha_data or "").strip():
@@ -170,7 +170,7 @@ def _pick_nome(cand, nome):
 
 
 def decidir(ext, rec, pag):
-    """Aplica a skill 1.39.4. Retorna lista de linhas com veredito/acao/id."""
+    """Aplica a skill 1.39.5. Retorna lista de linhas com veredito/acao/id."""
     desdobra = pares_cartao(ext, rec)
     out = []
     for i, linha in enumerate(ext):
@@ -258,9 +258,9 @@ def decidir(ext, rec, pag):
                     "veredito": "GRAVAR",
                     "acao": (
                         "Lote. Não procure um título neste valor. "
-                        "Selecione SOMENTE recebimentos que INICIAM com PAGTO "
-                        "(retorno de boletos). Nunca Pix/CR/RECEBIMENTO DE CARTÃO. "
-                        "Desmarque cartão. Se a soma bater no centavo, ligue."
+                        "Selecione SOMENTE recebimentos do MESMO DIA que INICIAM com PAGTO "
+                        "(retorno de boletos). Nunca Pix/CR/cartão nem outras datas. "
+                        "Se a soma do dia bater no centavo, ligue."
                     ),
                 }
             )
@@ -315,7 +315,7 @@ def decidir(ext, rec, pag):
             continue
 
         # Pix / depósito TED-cliente: achar título por valor (Pago ou Aberto)
-        # 1.39.4: Aberto N=1 no valor → GRAVAR baixar+ligar (não ARIADNA).
+        # 1.39.5: Aberto N=1 no valor → GRAVAR baixar+ligar (não ARIADNA).
         if classe in ("pix", "deposito"):
             # 1) mesmo dia
             cand = _match_valor(rec, v, dia_ln, exigir_dia=True)
