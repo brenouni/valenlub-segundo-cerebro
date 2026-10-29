@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conciliação do caixa 4 ValenLub — skill 1.39.6.
+"""Conciliação do caixa 4 ValenLub — skill 1.39.7.
 
 Função principal: conciliar_dia_valenlub(...)
 
@@ -871,7 +871,7 @@ def carregar_query(
     """GETs read-only. Retorna (receber, pagar, avisos).
 
     Exige QUERY_TENANT e (QUERY_TOKEN ou QUERY_USER+QUERY_PASS).
-    Skill 1.39.6: além da janela dt_baixa do dia, busca suplementar
+    Skill 1.39.7: além da janela dt_baixa do dia, busca suplementar
     statusCobranca=Aberto,Pago por vencimento (~45d) e cobrança (~7d)
     para achar CCR Pago com dtBaixa=null e Pix/DEP Abertos.
     """
@@ -2139,7 +2139,7 @@ def _contagem_central(
 ) -> dict[str, int]:
     """Contagem live da central (fonte da verdade do cabeçalho PDF/mensagem).
 
-    Skill 1.39.6: Conciliado/Falta/Ajuste vêm do GET periodo — não dos status
+    Skill 1.39.7: Conciliado/Falta/Ajuste vêm do GET periodo — não dos status
     da passagem (que mentem em re-executar de dia já fechado).
     """
     out = {"Conciliado": 0, "Falta": 0, "Ajuste": 0}
@@ -2213,7 +2213,7 @@ def _marcar_ja_conciliado_se_central(
 ) -> bool:
     """Se a linha do extrato já está Conciliado na central → ja_conciliado.
 
-    Retorna True se marcou. Skill 1.39.6 — evita PDF mentiroso em re-executar.
+    Retorna True se marcou. Skill 1.39.7 — evita PDF mentiroso em re-executar.
     """
     tx = _linha_extrato_central(
         opener,
@@ -3893,7 +3893,7 @@ def conciliar_dia_valenlub(
     cielo_csv_path: str | None = None,
     modo: str = "simular",
 ) -> ResultadoConciliacao:
-    """Concilia o caixa 4 do dia. Skill 1.39.6.
+    """Concilia o caixa 4 do dia. Skill 1.39.7.
 
     modo: "simular" (default) ou "executar".
     """
@@ -4094,7 +4094,7 @@ def relatorio_central_dia(
 ) -> dict[str, Any]:
     """Gera PDF/resumo a partir do GET periodo — zero POST.
 
-    Skill 1.39.6: cabeçalho = Conciliado/Falta/Ajuste da central.
+    Skill 1.39.7: cabeçalho = Conciliado/Falta/Ajuste da central.
     """
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", data or ""):
         return {"ok": False, "erro": "data deve ser YYYY-MM-DD"}
@@ -4325,7 +4325,7 @@ def _hermes_handler(args: dict, **kwargs) -> str:  # noqa: ARG001
 _HERMES_SCHEMA = {
     "name": "conciliar_dia_valenlub",
     "description": (
-        "Concilia o caixa 4 ValenLub no dia informado (skill 1.39.6). "
+        "Concilia o caixa 4 ValenLub no dia informado (skill 1.39.7). "
         "Lê OFX, GET Query contas-receber/contas-a-pagar, decide GRAVAR/ARIADNA, "
         "executa ou simula, gera PDF no visual aprovado."
     ),
@@ -4379,7 +4379,7 @@ def _cli() -> int:
     p.add_argument(
         "--relatorio-central",
         action="store_true",
-        help="Só-leitura: PDF/resumo a partir do GET periodo (zero POST). Skill 1.39.6.",
+        help="Só-leitura: PDF/resumo a partir do GET periodo (zero POST). Skill 1.39.7.",
     )
     p.add_argument(
         "--reabrir-dia",

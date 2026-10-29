@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decide a conciliação. O agente não escolhe. Fonte: skill 1.39.6."""
+"""Decide a conciliação. O agente não escolhe. Fonte: skill 1.39.7."""
 import json
 import re
 import sys
@@ -66,6 +66,42 @@ def status_tit(t):
     return str(t.get("status") or "").strip()
 
 
+def data_emissao_tit(t):
+    """Emissão (rotina 1100 filtro por emissão): dtCobrancaReceber / criação / competência.
+    Não usa vencimento nem baixa — Abertos Pix nascem com vencimento D+1."""
+    raw = t.get("raw") if isinstance(t.get("raw"), dict) else {}
+    datas = raw.get("datas") if isinstance(raw.get("datas"), dict) else {}
+    for src in (datas, raw, t):
+        if not isinstance(src, dict):
+            continue
+        for k in (
+            "dtEmissao",
+            "dt_emissao",
+            "dataEmissao",
+            "dtCobrancaReceber",
+            "dtCobrancaPagar",
+            "dtCriacao",
+            "dt_criacao",
+            "dtCompetencia",
+        ):
+            v = src.get(k)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+    return ""
+
+
+def tipo_cobranca(t):
+    raw = t.get("raw") if isinstance(t.get("raw"), dict) else {}
+    for src in (raw, t):
+        if not isinstance(src, dict):
+            continue
+        for k in ("cdCobrancaTipo", "cd_cobranca_tipo", "tipoCobranca", "formaPagamento"):
+            v = src.get(k)
+            if v is not None and str(v).strip():
+                return str(v).strip().upper()
+    return ""
+
+
 def _parts_dia(s):
     s2 = (s or "").replace("T", " ").split()[0]
     out = {s2, s2.replace("/", "-")}
@@ -81,7 +117,7 @@ def _parts_dia(s):
 
 
 def mesmo_dia_quando_ha(linha_data, tit_data):
-    """Data do título obrigatória (skill 1.39.6). Sem data → não casa."""
+    """Data do título obrigatória (skill 1.39.7). Sem data → não casa."""
     if not (tit_data or "").strip():
         return False
     if not (linha_data or "").strip():
@@ -170,7 +206,7 @@ def _pick_nome(cand, nome):
 
 
 def decidir(ext, rec, pag):
-    """Aplica a skill 1.39.6. Retorna lista de linhas com veredito/acao/id."""
+    """Aplica a skill 1.39.7. Retorna lista de linhas com veredito/acao/id."""
     desdobra = pares_cartao(ext, rec)
     out = []
     for i, linha in enumerate(ext):
@@ -315,18 +351,84 @@ def decidir(ext, rec, pag):
             continue
 
         # Pix / depósito TED-cliente: achar título por valor (Pago ou Aberto)
-        # 1.39.6: Aberto N=1 no valor → GRAVAR baixar+ligar (não ARIADNA).
+        # 1.39.7: entre candidatos no valor, preferir Aberto com emissão = dia do
+        # extrato (dtCobrancaReceber/criação — filtro 1100 por emissão). Pagos de
+        # outras datas NÃO geram ARIADNA se houver exatamente 1 Aberto emissão-dia.
+        # N=1 Aberto emissão-dia → GRAVAR baixa_antes+ligar; N>1 → ARIADNA.
         if classe in ("pix", "deposito"):
-            # 1) mesmo dia
+            cand_valor = _match_valor(rec, v, dia_ln, exigir_dia=False)
+            abertos_emis = [
+                t
+                for t in cand_valor
+                if status_tit(t).lower().startswith("abert")
+                and mesmo_dia_quando_ha(dia_ln, data_emissao_tit(t))
+            ]
+            # Preferir cdCobrancaTipo=PIX (exclui BOL ±0,02 no mesmo valor).
+            if classe == "pix" and abertos_emis:
+                com_pix = [t for t in abertos_emis if tipo_cobranca(t).startswith("PIX")]
+                if com_pix:
+                    abertos_emis = com_pix
+
+            if len(abertos_emis) == 1:
+                t = abertos_emis[0]
+                out.append(
+                    {
+                        **linha,
+                        "veredito": "GRAVAR",
+                        "id": t.get("id"),
+                        "baixa_antes": True,
+                        "acao": (
+                            f"Título {t.get('id')} Aberto {v:.2f} "
+                            f"(emissão={data_emissao_tit(t)[:10]} = dia extrato). "
+                            "Baixar 1100 (receber_transaction, juros/multa 0, "
+                            "caixa 4, idPessoa do título) e ligar Pix 1:1."
+                        ),
+                    }
+                )
+                continue
+            if len(abertos_emis) > 1:
+                t, varios = _pick_nome(abertos_emis, nome)
+                if t is not None:
+                    out.append(
+                        {
+                            **linha,
+                            "veredito": "GRAVAR",
+                            "id": t.get("id"),
+                            "baixa_antes": True,
+                            "acao": (
+                                f"Título {t.get('id')} Aberto {v:.2f} "
+                                f"(emissão dia; nome desambiguou N={len(abertos_emis)}). "
+                                "Baixar 1100 (juros/multa 0, caixa 4) e ligar Pix 1:1."
+                            ),
+                        }
+                    )
+                else:
+                    ids = varios or abertos_emis
+                    out.append(
+                        {
+                            **linha,
+                            "veredito": "ARIADNA",
+                            "acao": (
+                                f"Vários Abertos com emissão={dia_ln} no valor {v:.2f}. "
+                                "Ids: "
+                                + ", ".join(
+                                    f"{x.get('id')}(Aberto)" for x in ids[:6]
+                                )
+                                + ". Baixar na 1100 o adequado e religar."
+                            ),
+                        }
+                    )
+                continue
+
+            # Sem Aberto emissão-dia: fluxo Pago / ligar (dia preferido).
             cand = _match_valor(rec, v, dia_ln, exigir_dia=True)
             if not cand:
-                # 2) sem exigir dia (Aberto com baixa null / emissão outra)
-                cand = _match_valor(rec, v, dia_ln, exigir_dia=False)
+                cand = cand_valor
             t, varios = _pick_nome(cand, nome)
             if t is not None:
                 st = status_tit(t).lower()
                 if st.startswith("abert"):
-                    # Só N=1 no valor (centavo). Nome que desambigua N>1 → ARIADNA.
+                    # Aberto sem emissão no dia (ou emissão outra) — ainda N=1 no valor.
                     if len(cand) == 1:
                         out.append(
                             {
@@ -335,7 +437,7 @@ def decidir(ext, rec, pag):
                                 "id": t.get("id"),
                                 "baixa_antes": True,
                                 "acao": (
-                                    f"Título {t.get('id')} Aberto {v:.2f} (N=1). "
+                                    f"Título {t.get('id')} Aberto {v:.2f} (N=1 no valor). "
                                     "Baixar 1100 (receber_transaction, juros/multa 0, "
                                     "caixa 4, idPessoa do título) e ligar Pix 1:1."
                                 ),
